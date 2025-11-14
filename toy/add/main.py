@@ -15,9 +15,9 @@ from assassyn.frontend import *
 from assassyn.backend import *
 from assassyn import utils
 
-from decode import decode_instruction
-from common import decoded_instr
-from program import normalize_program, write_program_image
+from .decode import decode_instruction
+from .common import decoded_instr
+from .program import normalize_program, write_program_image
 
 
 class Fetcher(Module):
@@ -28,10 +28,16 @@ class Fetcher(Module):
         self.name = "Fetcher"
 
     @module.combinational
-    def build(self, depth_log: int):
-        # TODO: implement fetch logic
-        # Remember we need to consider RAW hazards
-        pass
+    def build(self, depth_log: int, decoder: Module):
+        pc_reg = RegArray(Bits(32), 1, initializer=[0])
+        pc_value = pc_reg[0]
+        # drop the low two bits to obtain the word address
+        addr_bits = pc_value[2 : 2 + depth_log]
+        pc_addr = addr_bits.bitcast(Int(depth_log))
+
+        log("toy-fetch  | pc=0x{:08x}", pc_value)
+        decoder.async_called()
+        return pc_reg, pc_value, pc_addr
 
 
 class Decoder(Module):
@@ -43,11 +49,11 @@ class Decoder(Module):
 
     @module.combinational
     def build(self, executor: Module, rdata: RegArray):
-        raw_inst = rdata[0].pop_all_ports(False)
+        raw_inst = rdata[0].bitcast(Bits(32))
         inst = decode_instruction(raw_inst)
         log("toy-decode | decoded inst: rd=x{:02}, rs1=x{:02}, rs2=x{:02}, is_addi={}", inst.rd, inst.rs1, inst.rs2, inst.is_addi)
 
-        executor.async_called(inst = inst)
+        executor.async_called(inst=inst)
 
         # no return, because no wire to expose
 
@@ -59,16 +65,35 @@ class Executor(Module):
         self.name = "Executor"
 
     @module.combinational
-    def build(self, reg_file: Array, reg_avail: Value, wb: Module):
+    def build(
+        self,
+        reg_file: Array,
+        reg_avail: Array,
+        wb: Module,
+        exec_rs1: Array,
+        exec_rs2: Array,
+        exec_is_addi: Array,
+        exec_has_inst: Array,
+    ):
         inst = self.inst.peek()
-        avail = reg_avail.bitcast(Bits(32))
+        is_ebreak = inst.is_ebreak
 
-        # hazard check: source registers must be available. For ADDI rs2 is an
-        # immediate so it is always available.
-        rs1_avail = avail[inst.rs1]
-        rs2_avail = inst.is_addi.select(Bits(1)(1), avail[inst.rs2])
+        exec_rs1[0] = inst.rs1
+        exec_rs2[0] = inst.rs2
+        exec_is_addi[0] = inst.is_addi
+        exec_has_inst[0] = Bits(1)(1)
 
-        with Condition(~(rs1_avail & rs2_avail)):
+        with Condition(is_ebreak):
+            x1_value = reg_file[Bits(5)(1)]
+            log("toy-exec   | ebreak reached, x1=0x{:08x}", x1_value)
+            finish()
+
+        rs1_avail = reg_avail[inst.rs1]
+        rs2_avail = inst.is_addi.select(Bits(1)(1), reg_avail[inst.rs2])
+
+        valid = rs1_avail & rs2_avail
+
+        with Condition(~valid):
             log(
                 "toy-exec   | hazard detected for inst rd=x{:02}, rs1=x{:02}, rs2/ximm=x{:02}, is_addi={}",
                 inst.rd,
@@ -77,21 +102,15 @@ class Executor(Module):
                 inst.is_addi,
             )
 
-        valid = rs1_avail & rs2_avail
         wait_until(valid)
 
-        # execution
+        # once we issue the instruction, the destination register becomes busy
+        write_enable = (inst.rd != Bits(5)(0))
+        with Condition(write_enable):
+            reg_avail[inst.rd] = Bits(1)(0)
+
         op_a = reg_file[inst.rs1]
-
-        imm32 = inst.rs2.bitcast(Bits(32))
-        op_b = inst.is_addi.select(imm32, reg_file[inst.rs2])
-
-        # TODO: implement ebreak instruction to finish simulation
-        # finish = ...
-        finished = False
-        with Condition(finished):
-            log('Finish Simulation')
-            finish()
+        op_b = inst.is_addi.select(inst.imm, reg_file[inst.rs2])
 
         result = (op_a.bitcast(Int(32)) + op_b.bitcast(Int(32))).bitcast(Bits(32))
 
@@ -104,16 +123,11 @@ class Executor(Module):
             inst.is_addi,
         )
 
-        # disable writes to x0
-        write_enable = (inst.rd != Bits(5)(0))
-
         wb.async_called(
             rd=inst.rd,
             value=result,
             enable=write_enable,
         )
-
-        # seems that we do not need to return either
 
 
 class WriteBack(Module):
@@ -130,7 +144,7 @@ class WriteBack(Module):
         self.name = "WriteBack"
 
     @module.combinational
-    def build(self, reg_file: Array, reg_avail: Value):
+    def build(self, reg_file: Array, reg_avail: Value, exec_has_inst: Array):
         rd, value, enable = self.pop_all_ports(False)
         do_write = enable
         reg_avail[rd] = do_write # mark register as available
@@ -138,6 +152,8 @@ class WriteBack(Module):
         with Condition(do_write):
             reg_file[rd] = value
             log("toy-wb     | x{:02} <= 0x{:08x}", rd, value)
+
+        exec_has_inst[0] = Bits(1)(0)
 
 
 # TODO: fix Driver to read instruction properly
@@ -149,8 +165,36 @@ class Driver(Module):
         self.name = "Driver"
 
     @module.combinational
-    def build(self, pc: Array, program_words: int):
-        pass
+    def build(
+        self,
+        pc: Array,
+        program_words: int,
+        fetcher: Module,
+        reg_avail: Array,
+        exec_rs1: Array,
+        exec_rs2: Array,
+        exec_is_addi: Array,
+        exec_has_inst: Array,
+    ):
+        pc_value = pc[0]
+        limit = Bits(32)(program_words * 4)
+        active = pc_value.bitcast(Int(32)) < limit.bitcast(Int(32))
+
+        has_inst = exec_has_inst[0]
+        rs1_ready = reg_avail[exec_rs1[0]]
+        rs2_ready = exec_is_addi[0].select(Bits(1)(1), reg_avail[exec_rs2[0]])
+        hazard_block = has_inst & ~(rs1_ready & rs2_ready)
+
+        can_fetch = active & ~hazard_block
+
+        step = can_fetch.select(Int(32)(4), Int(32)(0))
+        next_pc = (pc_value.bitcast(Int(32)) + step).bitcast(Bits(32))
+        pc[0] = next_pc
+
+        with Condition(can_fetch):
+            fetcher.async_called()
+
+        return active
 
 
 DEFAULT_WORKSPACE = Path(__file__).with_name(".workspace")
@@ -171,25 +215,33 @@ def build_cpu(
             outputs. Falls back to `toy/add/.workspace`.
     """
 
-    program_words = normalize_program(program)
+    if program is None:
+        program_words = [0x00100073]
+    else:
+        program_words = normalize_program(program)
     if depth_log <= 0:
         raise ValueError("depth_log must be positive.")
     depth = 1 << depth_log
+    if len(program_words) > depth:
+        raise ValueError(f"Program has {len(program_words)} words, exceeds instruction memory depth {depth}.")
 
-    # TODO: validate the write_program_image function
     workspace_path = Path(workspace) if workspace is not None else DEFAULT_WORKSPACE
     program_image = write_program_image(program_words, workspace_path)
 
-    sys = SysBuilder("Toy ADD CPU")
+    sys = SysBuilder("ToyADDCPU")
 
     with sys:
         fetcher = Fetcher()
-        pc_reg, pc_value, pc_addr = fetcher.build(depth_log=depth_log)
+        decoder = Decoder()
+        pc_reg, pc_value, pc_addr = fetcher.build(depth_log=depth_log, decoder=decoder)
 
         reg_file = RegArray(Bits(32), 32, initializer=[0] * 32)
-        reg_avail = Bits(32)((1 << 32) - 1) 
+        reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32)
+        exec_rs1 = RegArray(Bits(5), 1, initializer=[0])
+        exec_rs2 = RegArray(Bits(5), 1, initializer=[0])
+        exec_is_addi = RegArray(Bits(1), 1, initializer=[0])
+        exec_has_inst = RegArray(Bits(1), 1, initializer=[0])
 
-        decoder = Decoder()
         executor = Executor()
         writeback = WriteBack()
         driver = Driver()
@@ -203,12 +255,28 @@ def build_cpu(
             wdata=Bits(32)(0),
         )
 
-        decoder.build(executor=executor, rdata=icache.rdata)
-        executor.build(reg_file=reg_file, reg_avail=reg_avail, wb=writeback)
-        writeback.build(reg_file=reg_file, reg_avail=reg_avail)
+        decoder.build(executor=executor, rdata=icache.dout)
+        executor.build(
+            reg_file=reg_file,
+            reg_avail=reg_avail,
+            wb=writeback,
+            exec_rs1=exec_rs1,
+            exec_rs2=exec_rs2,
+            exec_is_addi=exec_is_addi,
+            exec_has_inst=exec_has_inst,
+        )
+        writeback.build(reg_file=reg_file, reg_avail=reg_avail, exec_has_inst=exec_has_inst)
 
-        # TODO: fix driver build
-        driver.build(pc=pc_reg, program_words=len(program_words))
+        driver.build(
+            pc=pc_reg,
+            program_words=len(program_words),
+            fetcher=fetcher,
+            reg_avail=reg_avail,
+            exec_rs1=exec_rs1,
+            exec_rs2=exec_rs2,
+            exec_is_addi=exec_is_addi,
+            exec_has_inst=exec_has_inst,
+        )
 
         sys.expose_on_top(reg_file, kind="Output")
         sys.expose_on_top(pc_reg, kind="Output")
@@ -216,8 +284,8 @@ def build_cpu(
     print(sys)
     conf = config(
         verilog=utils.has_verilator(),
-        sim_threshold=1024,
-        idle_threshold=1024,
+        sim_threshold=128,
+        idle_threshold=128,
         resource_base=str(workspace_path),
         fifo_depth=1,
     )
@@ -231,7 +299,9 @@ def build_cpu(
 
 def run_toy_cpu(program: Sequence[int] | Iterable[int] | Path | str | None = None, **kwargs):
     """Convenience wrapper that builds the CPU and runs its simulator."""
-    # TODO: implement unit test of CPU similar to the example
+    sys, simulator_binary, verilog_path = build_cpu(program, **kwargs)
+    sim_output = utils.run_simulator(binary_path=simulator_binary)
+    return sim_output, verilog_path
 
 
 if __name__ == "__main__":
