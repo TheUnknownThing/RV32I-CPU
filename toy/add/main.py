@@ -36,24 +36,31 @@ class Fetcher(Module):
         pc_addr = addr_bits.bitcast(Int(depth_log))
 
         log("toy-fetch  | pc=0x{:08x}", pc_value)
-        decoder.async_called()
-        return pc_reg, pc_value, pc_addr
+
+        decoder.async_called(pc_value=pc_value)
+
+        next_pc = (pc_value.bitcast(Int(32)) + Int(32)(4)).bitcast(Bits(32))
+        pc_reg[0] = next_pc
+
+        return pc_reg, pc_addr
 
 
 class Decoder(Module):
     """Minimal ADD/ADDI decoder that produces a compact bundle."""
 
     def __init__(self):
-        super().__init__(ports={})
+        super().__init__(ports={"pc_value": Port(Bits(32))})
         self.name = "Decoder"
 
     @module.combinational
     def build(self, executor: Module, rdata: RegArray):
+        pc_value = self.pop_all_ports(False)
         raw_inst = rdata[0].bitcast(Bits(32))
         inst = decode_instruction(raw_inst)
         log("toy-decode | decoded inst: rd=x{:02}, rs1=x{:02}, rs2=x{:02}, is_addi={}", inst.rd, inst.rs1, inst.rs2, inst.is_addi)
 
-        executor.async_called(inst=inst)
+        exec_call = executor.async_called(inst=inst, pc_value=pc_value)
+        exec_call.bind.set_fifo_depth(inst=2)
 
         # no return, because no wire to expose
 
@@ -61,7 +68,7 @@ class Executor(Module):
     """Single-cycle execution stage with a single adder."""
 
     def __init__(self):
-        super().__init__(ports={"inst": Port(decoded_instr)})
+        super().__init__(ports={"inst": Port(decoded_instr), "pc_value": Port(Bits(32))})
         self.name = "Executor"
 
     @module.combinational
@@ -69,14 +76,15 @@ class Executor(Module):
         self,
         reg_file: Array,
         reg_avail: Array,
-        wb: Module,
+        wb: Module
     ):
         inst = self.inst.peek()
+        pc_value = self.pc_value.peek()
         is_ebreak = inst.is_ebreak
-
+        
         with Condition(is_ebreak):
             x1_value = reg_file[Bits(5)(1)]
-            log("toy-exec   | ebreak reached, x1=0x{:08x}", x1_value)
+            log("toy-exec   | ebreak at pc: 0x{:08x}, x1=0x{:08x}", pc_value, x1_value)
             finish()
 
         rs1_avail = reg_avail[inst.rs1]
@@ -86,7 +94,8 @@ class Executor(Module):
 
         with Condition(~valid):
             log(
-                "toy-exec   | hazard detected for inst rd=x{:02}, rs1=x{:02}, rs2/ximm=x{:02}, is_addi={}",
+                "toy-exec   | executing pc: 0x{:08x} hazard detected for inst rd=x{:02}, rs1=x{:02}, rs2/ximm=x{:02}, is_addi={}",
+                pc_value,
                 inst.rd,
                 inst.rs1,
                 inst.rs2,
@@ -95,7 +104,7 @@ class Executor(Module):
 
         wait_until(valid)
 
-        inst = self.pop_all_ports(False)
+        inst, pc_value = self.pop_all_ports(False)
 
         # once we issue the instruction, the destination register becomes busy
         write_enable = (inst.rd != Bits(5)(0))
@@ -108,7 +117,8 @@ class Executor(Module):
         result = (op_a.bitcast(Int(32)) + op_b.bitcast(Int(32))).bitcast(Bits(32))
 
         log(
-            "toy-exec   | rd: x{:02} | a: 0x{:08x} | b: 0x{:08x} | res: 0x{:08x} | is_addi={}",
+            "toy-exec   | executing pc: 0x{:08x} | rd: x{:02} | a: 0x{:08x} | b: 0x{:08x} | res: 0x{:08x} | is_addi={}",
+            pc_value,
             inst.rd,
             op_a,
             op_b,
@@ -167,11 +177,6 @@ class Driver(Module):
         active = pc_value.bitcast(Int(32)) < limit.bitcast(Int(32))
 
         can_fetch = active
-
-        step = can_fetch.select(Int(32)(4), Int(32)(0))
-        next_pc = (pc_value.bitcast(Int(32)) + step).bitcast(Bits(32))
-        pc[0] = next_pc
-
         with Condition(can_fetch):
             fetcher.async_called()
 
@@ -214,7 +219,7 @@ def build_cpu(
     with sys:
         fetcher = Fetcher()
         decoder = Decoder()
-        pc_reg, pc_value, pc_addr = fetcher.build(depth_log=depth_log, decoder=decoder)
+        pc_reg, pc_addr = fetcher.build(depth_log=depth_log, decoder=decoder)
 
         reg_file = RegArray(Bits(32), 32, initializer=[0] * 32)
         reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32) 
@@ -236,7 +241,7 @@ def build_cpu(
         executor.build(
             reg_file=reg_file,
             reg_avail=reg_avail,
-            wb=writeback,
+            wb=writeback
         )
         writeback.build(reg_file=reg_file, reg_avail=reg_avail)
 

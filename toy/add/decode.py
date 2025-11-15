@@ -32,22 +32,8 @@ def decode_instruction(instr: Value) -> Value:
     funct7 = instr[25:31]
     imm = _sign_extend_bits(instr[20:31], 12)
 
-    is_add = (
-        (opcode == Bits(7)(ADD_OPCODE))
-        & (funct3 == Bits(3)(FUNCT3_ADD))
-        & (funct7 == Bits(7)(FUNCT7_ADD))
-    )
     is_addi = (opcode == Bits(7)(ADDI_OPCODE)) & (funct3 == Bits(3)(FUNCT3_ADD))
     is_ebreak = instr == Bits(32)(EBREAK_ENCODING)
-
-    log(
-        "toy-decode | inst: 0x{:08x} | rd: x{:02} | rs1: x{:02} | rs2: x{:02} | imm: 0x{:08x}",
-        instr,
-        rd,
-        rs1,
-        rs2,
-        imm,
-    )
 
     return decoded_instr.bundle(
         rs1=rs1,
