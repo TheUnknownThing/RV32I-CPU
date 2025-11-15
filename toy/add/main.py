@@ -70,18 +70,9 @@ class Executor(Module):
         reg_file: Array,
         reg_avail: Array,
         wb: Module,
-        exec_rs1: Array,
-        exec_rs2: Array,
-        exec_is_addi: Array,
-        exec_has_inst: Array,
     ):
         inst = self.inst.peek()
         is_ebreak = inst.is_ebreak
-
-        exec_rs1[0] = inst.rs1
-        exec_rs2[0] = inst.rs2
-        exec_is_addi[0] = inst.is_addi
-        exec_has_inst[0] = Bits(1)(1)
 
         with Condition(is_ebreak):
             x1_value = reg_file[Bits(5)(1)]
@@ -103,6 +94,8 @@ class Executor(Module):
             )
 
         wait_until(valid)
+
+        inst = self.pop_all_ports(False)
 
         # once we issue the instruction, the destination register becomes busy
         write_enable = (inst.rd != Bits(5)(0))
@@ -144,7 +137,7 @@ class WriteBack(Module):
         self.name = "WriteBack"
 
     @module.combinational
-    def build(self, reg_file: Array, reg_avail: Value, exec_has_inst: Array):
+    def build(self, reg_file: Array, reg_avail: Value):
         rd, value, enable = self.pop_all_ports(False)
         do_write = enable
         reg_avail[rd] = do_write # mark register as available
@@ -152,8 +145,6 @@ class WriteBack(Module):
         with Condition(do_write):
             reg_file[rd] = value
             log("toy-wb     | x{:02} <= 0x{:08x}", rd, value)
-
-        exec_has_inst[0] = Bits(1)(0)
 
 
 # TODO: fix Driver to read instruction properly
@@ -169,23 +160,13 @@ class Driver(Module):
         self,
         pc: Array,
         program_words: int,
-        fetcher: Module,
-        reg_avail: Array,
-        exec_rs1: Array,
-        exec_rs2: Array,
-        exec_is_addi: Array,
-        exec_has_inst: Array,
+        fetcher: Module
     ):
         pc_value = pc[0]
         limit = Bits(32)(program_words * 4)
         active = pc_value.bitcast(Int(32)) < limit.bitcast(Int(32))
 
-        has_inst = exec_has_inst[0]
-        rs1_ready = reg_avail[exec_rs1[0]]
-        rs2_ready = exec_is_addi[0].select(Bits(1)(1), reg_avail[exec_rs2[0]])
-        hazard_block = has_inst & ~(rs1_ready & rs2_ready)
-
-        can_fetch = active & ~hazard_block
+        can_fetch = active
 
         step = can_fetch.select(Int(32)(4), Int(32)(0))
         next_pc = (pc_value.bitcast(Int(32)) + step).bitcast(Bits(32))
@@ -236,11 +217,7 @@ def build_cpu(
         pc_reg, pc_value, pc_addr = fetcher.build(depth_log=depth_log, decoder=decoder)
 
         reg_file = RegArray(Bits(32), 32, initializer=[0] * 32)
-        reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32)
-        exec_rs1 = RegArray(Bits(5), 1, initializer=[0])
-        exec_rs2 = RegArray(Bits(5), 1, initializer=[0])
-        exec_is_addi = RegArray(Bits(1), 1, initializer=[0])
-        exec_has_inst = RegArray(Bits(1), 1, initializer=[0])
+        reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32) 
 
         executor = Executor()
         writeback = WriteBack()
@@ -260,22 +237,13 @@ def build_cpu(
             reg_file=reg_file,
             reg_avail=reg_avail,
             wb=writeback,
-            exec_rs1=exec_rs1,
-            exec_rs2=exec_rs2,
-            exec_is_addi=exec_is_addi,
-            exec_has_inst=exec_has_inst,
         )
-        writeback.build(reg_file=reg_file, reg_avail=reg_avail, exec_has_inst=exec_has_inst)
+        writeback.build(reg_file=reg_file, reg_avail=reg_avail)
 
         driver.build(
             pc=pc_reg,
             program_words=len(program_words),
             fetcher=fetcher,
-            reg_avail=reg_avail,
-            exec_rs1=exec_rs1,
-            exec_rs2=exec_rs2,
-            exec_is_addi=exec_is_addi,
-            exec_has_inst=exec_has_inst,
         )
 
         sys.expose_on_top(reg_file, kind="Output")

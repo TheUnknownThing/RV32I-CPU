@@ -52,6 +52,7 @@ def run_case(case: ToyCase) -> None:
         raise AssertionError("Simulator output does not show an ebreak event.")
     observed = _extract_x1_value(sim_output)
     if observed != case.expected_x1:
+        print(f"Simulator output:\n{sim_output}")
         raise AssertionError(
             f"x1 mismatch: observed 0x{observed:08x}, expected 0x{case.expected_x1:08x}"
         )
