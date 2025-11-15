@@ -177,14 +177,16 @@ class Driver(Module):
         program_words: int,
         fetcher: Module,
     ):
-        pc_value = pc[0]
-        limit = Bits(32)(program_words * 4)
-        active = pc_value.bitcast(Int(32)) < limit.bitcast(Int(32))
+        remaining_fetches = RegArray(Bits(32), 1, initializer=[program_words])
+        remaining = remaining_fetches[0]
+        has_remaining = remaining.bitcast(Int(32)) > Int(32)(0)
 
-        with Condition(active):
+        with Condition(has_remaining):
             fetcher.async_called()
+            next_remaining = (remaining.bitcast(Int(32)) - Int(32)(1)).bitcast(Bits(32))
+            remaining_fetches[0] = next_remaining
 
-        return active
+        return has_remaining
 
 
 DEFAULT_WORKSPACE = Path(__file__).with_name(".workspace")

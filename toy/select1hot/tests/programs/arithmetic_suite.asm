@@ -35,6 +35,6 @@
     add  x1, x1, x16
     add  x1, x1, x17
     addi x1, x1, 1
-    add  x0, x0, x0
+    add  x0, x0, x0         // no-op, for x1 to write to RF
 
     ebreak

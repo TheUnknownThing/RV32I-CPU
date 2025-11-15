@@ -1,7 +1,7 @@
 To fully understand how Assassyn works, I plan to write several toy projects.
 
 - [x] Add
-- [ ] Select1Hot
+- [x] Select1Hot
 - [ ] Memory
 - [ ] Branch
 
@@ -20,3 +20,8 @@ Key points here:
 Now the `exec` stage supports more instructions and uses a one-hot selection mechanism for choosing the value.
 
 It supports all the arithmetic instructions of RV32I, i.e., add, sub, sll, srl, sra, and, or, xor, slt, sltu, and their immediate variants.
+
+Key points here:
+
+- op_select initialization in decode.py
+- The exec stage uses a select1hot mechanism to choose the ALU operation.
