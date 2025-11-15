@@ -25,3 +25,7 @@ Key points here:
 
 - op_select initialization in decode.py
 - The exec stage uses a select1hot mechanism to choose the ALU operation.
+
+# Memory
+
+Implement all the memory instructions of RV32I, i.e., lb, lh, lw, lbu, lhu, sb, sh, sw.
