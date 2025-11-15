@@ -1,10 +1,4 @@
-"""A tiny ADD/ADDI-only RV32I core built with Assassyn.
-
-The goal of this example is to provide the smallest possible pipeline that still
-touches all major pieces of an Assassyn design: fetch, decode, execute and
-writeback.  All instruction-format helpers and the software golden model live in
-`toy.add.program`, keeping this file focused solely on Assassyn semantics.
-"""
+"""A toy RV32I Select1Hot CPU supporting the arithmetic subset."""
 
 from __future__ import annotations
 
@@ -16,12 +10,12 @@ from assassyn.backend import *
 from assassyn import utils
 
 from .decode import decode_instruction
-from .common import decoded_instr
+from .common import AluOp, decoded_instr
 from .program import normalize_program, write_program_image
 
 
 class Fetcher(Module):
-    """Holds the program counter."""
+    """Maintains the program counter."""
 
     def __init__(self):
         super().__init__(ports={})
@@ -31,7 +25,6 @@ class Fetcher(Module):
     def build(self, depth_log: int, decoder: Module):
         pc_reg = RegArray(Bits(32), 1, initializer=[0])
         pc_value = pc_reg[0]
-        # drop the low two bits to obtain the word address
         addr_bits = pc_value[2 : 2 + depth_log]
         pc_addr = addr_bits.bitcast(Int(depth_log))
 
@@ -46,7 +39,7 @@ class Fetcher(Module):
 
 
 class Decoder(Module):
-    """Minimal ADD/ADDI decoder that produces a compact bundle."""
+    """Decodes all arithmetic RV32I instructions."""
 
     def __init__(self):
         super().__init__(ports={"pc_value": Port(Bits(32))})
@@ -57,15 +50,20 @@ class Decoder(Module):
         pc_value = self.pop_all_ports(False)
         raw_inst = rdata[0].bitcast(Bits(32))
         inst = decode_instruction(raw_inst)
-        log("toy-decode | decoded inst: rd=x{:02}, rs1=x{:02}, rs2=x{:02}, is_addi={}", inst.rd, inst.rs1, inst.rs2, inst.is_addi)
+        log(
+            "toy-decode | pc=0x{:08x} rd=x{:02} rs1=x{:02} op=0x{:03x}",
+            pc_value,
+            inst.rd,
+            inst.rs1,
+            inst.op_select,
+        )
 
         exec_call = executor.async_called(inst=inst, pc_value=pc_value)
         exec_call.bind.set_fifo_depth(inst=2)
 
-        # no return, because no wire to expose
 
 class Executor(Module):
-    """Single-cycle execution stage with a single adder."""
+    """Single-cycle execute stage with a select1hot ALU."""
 
     def __init__(self):
         super().__init__(ports={"inst": Port(decoded_instr), "pc_value": Port(Bits(32))})
@@ -76,54 +74,63 @@ class Executor(Module):
         self,
         reg_file: Array,
         reg_avail: Array,
-        wb: Module
+        wb: Module,
     ):
         inst = self.inst.peek()
         pc_value = self.pc_value.peek()
-        is_ebreak = inst.is_ebreak
-        
-        with Condition(is_ebreak):
+
+        with Condition(inst.is_ebreak):
             x1_value = reg_file[Bits(5)(1)]
             log("toy-exec   | ebreak at pc: 0x{:08x}, x1=0x{:08x}", pc_value, x1_value)
             finish()
 
         rs1_avail = reg_avail[inst.rs1]
-        rs2_avail = inst.is_addi.select(Bits(1)(1), reg_avail[inst.rs2])
+        rs2_avail = inst.use_imm.select(Bits(1)(1), reg_avail[inst.rs2])
+        operands_ready = rs1_avail & rs2_avail
 
-        valid = rs1_avail & rs2_avail
-
-        with Condition(~valid):
+        with Condition(~operands_ready):
             log(
-                "toy-exec   | executing pc: 0x{:08x} hazard detected for inst rd=x{:02}, rs1=x{:02}, rs2/ximm=x{:02}, is_addi={}",
+                "toy-exec   | hazard pc:0x{:08x} rd=x{:02} rs1=x{:02} rs2=0x{:02x} use_imm={}",
                 pc_value,
                 inst.rd,
                 inst.rs1,
                 inst.rs2,
-                inst.is_addi,
+                inst.use_imm,
             )
 
-        wait_until(valid)
-
+        wait_until(operands_ready)
         inst, pc_value = self.pop_all_ports(False)
 
-        # once we issue the instruction, the destination register becomes busy
-        write_enable = (inst.rd != Bits(5)(0))
+        write_enable = inst.rd != Bits(5)(0)
         with Condition(write_enable):
             reg_avail[inst.rd] = Bits(1)(0)
 
         op_a = reg_file[inst.rs1]
-        op_b = inst.is_addi.select(inst.imm, reg_file[inst.rs2])
+        op_b = inst.use_imm.select(inst.imm, reg_file[inst.rs2])
+        shamt = inst.use_shamt.select(inst.shamt, reg_file[inst.rs2][0:4])
 
-        result = (op_a.bitcast(Int(32)) + op_b.bitcast(Int(32))).bitcast(Bits(32))
+        results = [Bits(32)(0)] * AluOp.COUNT
+        results[AluOp.ADD] = (op_a.bitcast(Int(32)) + op_b.bitcast(Int(32))).bitcast(Bits(32))
+        results[AluOp.SUB] = (op_a.bitcast(Int(32)) - op_b.bitcast(Int(32))).bitcast(Bits(32))
+        results[AluOp.SLL] = op_a << shamt
+        results[AluOp.SRL] = op_a >> shamt
+        results[AluOp.SRA] = (op_a.bitcast(Int(32)) >> shamt.bitcast(Int(5))).bitcast(Bits(32))
+        results[AluOp.AND] = op_a & op_b
+        results[AluOp.OR] = op_a | op_b
+        results[AluOp.XOR] = op_a ^ op_b
+        results[AluOp.SLT] = (op_a.bitcast(Int(32)) < op_b.bitcast(Int(32))).select(Bits(32)(1), Bits(32)(0))
+        results[AluOp.SLTU] = (op_a < op_b).select(Bits(32)(1), Bits(32)(0))
+
+        result = inst.op_select.select1hot(*results)
 
         log(
-            "toy-exec   | executing pc: 0x{:08x} | rd: x{:02} | a: 0x{:08x} | b: 0x{:08x} | res: 0x{:08x} | is_addi={}",
+            "toy-exec   | pc:0x{:08x} rd=x{:02} rs1=x{:02} rs2=0x{:02x} use_imm={} res=0x{:08x}",
             pc_value,
             inst.rd,
-            op_a,
-            op_b,
+            inst.rs1,
+            inst.rs2,
+            inst.use_imm,
             result,
-            inst.is_addi,
         )
 
         wb.async_called(
@@ -134,7 +141,7 @@ class Executor(Module):
 
 
 class WriteBack(Module):
-    """Writes execution results into the architectural register file."""
+    """Writes execution results into the register file."""
 
     def __init__(self):
         super().__init__(
@@ -148,15 +155,16 @@ class WriteBack(Module):
 
     @module.combinational
     def build(self, reg_file: Array, reg_avail: Array):
-        rd, value,enable = self.pop_all_ports(False)
-        reg_avail[rd] = Bits(1)(1) # mark register as available
+        rd, value, enable = self.pop_all_ports(False)
+        reg_avail[rd] = Bits(1)(1)
 
         with Condition(enable):
             reg_file[rd] = value
             log("toy-wb     | x{:02} <= 0x{:08x}", rd, value)
 
+
 class Driver(Module):
-    """Stops the simulation once the program counter leaves the program image."""
+    """Stops the simulation when PC leaves program image."""
 
     def __init__(self):
         super().__init__(ports={})
@@ -167,14 +175,13 @@ class Driver(Module):
         self,
         pc: Array,
         program_words: int,
-        fetcher: Module
+        fetcher: Module,
     ):
         pc_value = pc[0]
         limit = Bits(32)(program_words * 4)
         active = pc_value.bitcast(Int(32)) < limit.bitcast(Int(32))
 
-        can_fetch = active
-        with Condition(can_fetch):
+        with Condition(active):
             fetcher.async_called()
 
         return active
@@ -189,14 +196,7 @@ def build_cpu(
     depth_log: int = 4,
     workspace: Path | str | None = None,
 ):
-    """Build and elaborate the ADD/ADDI toy CPU.
-
-    Args:
-        program: Iterable of 32-bit instruction words or a path to a hex file.
-        depth_log: log2(depth) of the instruction memory SRAM.
-        workspace: Directory used for temporary program images and simulator
-            outputs. Falls back to `toy/add/.workspace`.
-    """
+    """Build and elaborate the Select1Hot toy CPU."""
 
     program_words = normalize_program(program)
     if depth_log <= 0:
@@ -208,7 +208,7 @@ def build_cpu(
     workspace_path = Path(workspace) if workspace is not None else DEFAULT_WORKSPACE
     program_image = write_program_image(program_words, workspace_path)
 
-    sys = SysBuilder("ToyADDCPU")
+    sys = SysBuilder("ToySelect1HotCPU")
 
     with sys:
         fetcher = Fetcher()
@@ -216,14 +216,14 @@ def build_cpu(
         pc_reg, pc_addr = fetcher.build(depth_log=depth_log, decoder=decoder)
 
         reg_file = RegArray(Bits(32), 32, initializer=[0] * 32)
-        reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32) 
+        reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32)
 
         executor = Executor()
         writeback = WriteBack()
         driver = Driver()
 
         icache = SRAM(width=32, depth=depth, init_file=str(program_image))
-        icache.name = "toy_icache"
+        icache.name = "toy_select1hot_icache"
         icache.build(
             we=Bits(1)(0),
             re=Bits(1)(1),
@@ -235,7 +235,7 @@ def build_cpu(
         executor.build(
             reg_file=reg_file,
             reg_avail=reg_avail,
-            wb=writeback
+            wb=writeback,
         )
         writeback.build(reg_file=reg_file, reg_avail=reg_avail)
 
@@ -251,8 +251,8 @@ def build_cpu(
     print(sys)
     conf = config(
         verilog=utils.has_verilator(),
-        sim_threshold=128,
-        idle_threshold=128,
+        sim_threshold=256,
+        idle_threshold=256,
         resource_base=str(workspace_path),
         fifo_depth=1,
     )
@@ -264,8 +264,9 @@ def build_cpu(
     return sys, simulator_binary, verilog_path
 
 
-def run_toy_cpu(program: Sequence[int] | Iterable[int] | Path | str | None = None, **kwargs):
-    """Convenience wrapper that builds the CPU and runs its simulator."""
+def run_select1hot_cpu(program: Sequence[int] | Iterable[int] | Path | str | None = None, **kwargs):
+    """Convenience wrapper that builds and runs the Select1Hot CPU."""
+
     sys, simulator_binary, verilog_path = build_cpu(program, **kwargs)
     sim_output = utils.run_simulator(binary_path=simulator_binary)
     return sim_output, verilog_path
@@ -273,4 +274,4 @@ def run_toy_cpu(program: Sequence[int] | Iterable[int] | Path | str | None = Non
 
 if __name__ == "__main__":
     sys, simulator_binary, verilog_path = build_cpu()
-    print("Toy ADD CPU built successfully!")
+    print("Toy Select1Hot CPU built successfully!")

@@ -60,6 +60,8 @@ def run_case(case: ToyCase) -> None:
         )
     print(f"[PASS] {case.name}: x1=0x{observed:08x}")
 
+    (workspace / "sim.log").write_text(sim_output)
+
 
 def main() -> None:
     for case in CASES:
