@@ -148,11 +148,10 @@ class WriteBack(Module):
 
     @module.combinational
     def build(self, reg_file: Array, reg_avail: Value):
-        rd, value, enable = self.pop_all_ports(False)
-        do_write = enable
-        reg_avail[rd] = do_write # mark register as available
+        rd, value,enable = self.pop_all_ports(False)
+        reg_avail[rd] = Bits(1)(1) # mark register as available
 
-        with Condition(do_write):
+        with Condition(enable):
             reg_file[rd] = value
             log("toy-wb     | x{:02} <= 0x{:08x}", rd, value)
 

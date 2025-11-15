@@ -18,6 +18,7 @@ class ToyCase:
 
 
 CASES = [
+    ToyCase("simple_no_hazard", "simple_no_hazard.hex", "simple_no_hazard.asm", expected_x1=7),
     ToyCase("addi_only", "addi_only.hex", "addi_only.asm", expected_x1=12),
     ToyCase("add_mix", "add_mix.hex", "add_mix.asm", expected_x1=13),
     ToyCase("chain_add", "chain_add.hex", "chain_add.asm", expected_x1=9),
@@ -34,6 +35,7 @@ def _extract_x1_value(sim_output: str) -> int:
     for reg_str, raw_value in reversed(writes):
         if int(reg_str) == 1:
             return int(raw_value, 16)
+    print(f"Simulator output:\n{sim_output}")
     raise AssertionError("No write to x1 observed in simulator output.")
 
 
@@ -63,6 +65,7 @@ def main() -> None:
     for case in CASES:
         try:
             run_case(case)
+            print(f"[PASS] {case.name}")
         except Exception as err:  # pylint: disable=broad-except
             print(f"[FAIL] {case.name}: {err}")
             raise SystemExit(f"Toy ADD test failed: {case.name}")
