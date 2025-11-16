@@ -22,6 +22,7 @@ CASES = [
     ToyCase("addi_only", "addi_only.hex", "addi_only.asm", expected_x1=12),
     ToyCase("add_mix", "add_mix.hex", "add_mix.asm", expected_x1=13),
     ToyCase("chain_add", "chain_add.hex", "chain_add.asm", expected_x1=9),
+    ToyCase("chain_long", "chain_long.hex", "chain_long.asm", expected_x1=133),
 ]
 
 CASE_DIR = Path(__file__).parent / "programs"

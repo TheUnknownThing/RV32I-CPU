@@ -5,6 +5,10 @@ To fully understand how Assassyn works, I plan to write several toy projects.
 - [ ] Memory
 - [ ] Branch
 
+# Note
+
+When handling RAW Hazard, Assassyn would store the `async_called` in a FIFO. When simulating with Rust, the FIFO do not have limits (so examples like toy/add/tests/programs/chain_long would pass, which requires 7 slot FIFO, but I only give it 2 slots), but in verilog synthesis, the FIFO depth is limited. In the CPU written here as toy examples, I do not take care of the FIFO depth limit (I would need to add logic to handle FIFO full conditions in real RV32I CPU).
+
 # Add
 
 This is the simplest CPU that only support `add` and `addi` instructions. See [add/main.py](add/main.py) for more details. It is tested.
