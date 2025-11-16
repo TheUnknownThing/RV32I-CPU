@@ -93,3 +93,17 @@ def read_memory_config(path: Path | str | None) -> MemoryConfig:
     pc_offset = _to_int(config_dict.get("offset", 0)) & 0xFFFFFFFF
     data_offset = _to_int(config_dict.get("data_offset", 0)) & 0xFFFFFFFF
     return MemoryConfig(pc_offset=pc_offset, data_offset=data_offset)
+
+
+def bytes_to_words(byte_values: Sequence[int], depth_words: int) -> list[int]:
+    """Helper function for initializing memory from bytes."""
+    
+    words: list[int] = []
+    for word_idx in range(depth_words):
+        assembled = 0
+        for byte in range(4):
+            idx = word_idx * 4 + byte
+            if idx < len(byte_values):
+                assembled |= (int(byte_values[idx]) & 0xFF) << (8 * byte)
+        words.append(assembled & 0xFFFFFFFF)
+    return words
