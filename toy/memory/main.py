@@ -32,17 +32,8 @@ class Driver(Module):
         self.name = "Driver"
 
     @module.combinational
-    def build(self, pc_reg: Array, program_words: int, fetcher: Module):
-        remaining_fetches = RegArray(Bits(32), 1, initializer=[program_words])
-        remaining = remaining_fetches[0]
-        has_remaining = remaining.bitcast(Int(32)) > Int(32)(0)
-
-        with Condition(has_remaining):
-            fetcher.async_called()
-            next_remaining = (remaining.bitcast(Int(32)) - Int(32)(1)).bitcast(Bits(32))
-            remaining_fetches[0] = next_remaining
-
-        return has_remaining
+    def build(self, fetcher: Module):
+        fetcher.async_called()
 
 
 DEFAULT_WORKSPACE = Path(__file__).with_name(".workspace")
@@ -90,7 +81,12 @@ def build_cpu(
         writeback = WriteBack()
         driver = Driver()
 
-        pc_reg, pc_addr = fetcher.build(depth_log=depth_log, decoder=decoder, pc_offset=mem_config.pc_offset)
+        pc_reg, pc_addr = fetcher.build(
+            depth_log=depth_log,
+            decoder=decoder,
+            pc_offset=mem_config.pc_offset,
+            program_words=len(program_words),
+        )
 
         reg_file = RegArray(Bits(32), 32, initializer=[0] * 32)
         reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32)
@@ -123,7 +119,7 @@ def build_cpu(
         )
         writeback.build(reg_file=reg_file, reg_avail=reg_avail)
 
-        driver.build(pc_reg=pc_reg, program_words=len(program_words), fetcher=fetcher)
+        driver.build(fetcher=fetcher)
 
         sys.expose_on_top(reg_file, kind="Output")
         sys.expose_on_top(pc_reg, kind="Output")
