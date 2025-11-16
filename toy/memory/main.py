@@ -86,7 +86,7 @@ def build_cpu(
         fetcher = Fetcher()
         decoder = Decoder()
         executor = Executor()
-        memory_stage = MemoryAccess()
+        memory = MemoryAccess()
         writeback = WriteBack()
         driver = Driver()
 
@@ -94,7 +94,7 @@ def build_cpu(
 
         reg_file = RegArray(Bits(32), 32, initializer=[0] * 32)
         reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32)
-        
+
         icache = SRAM(width=32, depth=depth, init_file=str(program_image))
         icache.name = "toy_memory_icache"
         icache.build(
@@ -108,13 +108,18 @@ def build_cpu(
         dcache.name = "toy_memory_dcache"
 
         decoder.build(executor=executor, rdata=icache.dout)
-        executor.build(reg_file=reg_file, reg_avail=reg_avail, memory=memory_stage)
-        memory_stage.build(
+        executor.build(
+            reg_file=reg_file,
+            reg_avail=reg_avail,
+            memory=memory,
             dcache=dcache,
-            wb=writeback,
             data_offset=mem_config.data_offset,
             data_bytes=total_data_bytes,
             word_addr_width=word_addr_width,
+        )
+        memory.build(
+            dout=dcache.dout,
+            wb=writeback,
         )
         writeback.build(reg_file=reg_file, reg_avail=reg_avail)
 
