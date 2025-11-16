@@ -24,5 +24,6 @@ class WriteBack(Module):
             log("toy-wb     | x{:02} <= 0x{:08x}", rd, value)
 
         with Condition(is_ebreak):
+            log("toy-wb     | ebreak encountered")
             finish()
 
