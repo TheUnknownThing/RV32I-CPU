@@ -94,9 +94,7 @@ def build_cpu(
 
         reg_file = RegArray(Bits(32), 32, initializer=[0] * 32)
         reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32)
-        # data_mem = RegArray(Bits(32), data_word_depth, initializer=data_words)
-
-
+        
         icache = SRAM(width=32, depth=depth, init_file=str(program_image))
         icache.name = "toy_memory_icache"
         icache.build(

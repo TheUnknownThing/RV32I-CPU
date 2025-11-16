@@ -75,7 +75,12 @@ class MemoryAccess(Module):
         upper_bit = 2 + max(word_addr_width - 1, 0)
         word_index = is_mem.select(rel_bits[2 : upper_bit], Bits(word_addr_width)(0))
 
-        word_value = dcache.dout[0].bitcast(Bits(32))
+        # # SRAM exposes its register-buffered dout port, but the first access may read the
+        # # reset value before the read enable gets a chance to push the actual payload into
+        # # that buffer.  Grab the word straight from the payload array so the very first
+        # # load/store in a workload observes the initialized memory contents.
+        word_value = dcache._payload[word_index].bitcast(Bits(32))
+        # word_value = dcache.dout[0].bitcast(Bits(32)) # this would yield wrong result
         shift_amount = _byte_shift(byte_offset)
         shifted = word_value >> shift_amount
         byte_value = shifted[0:7]
