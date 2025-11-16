@@ -29,7 +29,6 @@ class Executor(Module):
         rs1_avail = reg_avail[inst.rs1]
         rs2_avail = inst.rs2_is_source.select(reg_avail[inst.rs2], Bits(1)(1))
         operands_ready = rs1_avail & rs2_avail
-
         with Condition(~operands_ready):
             log(
                 "toy-exec   | hazard pc:0x{:08x} rd=x{:02} rs1=x{:02} rs2=x{:02} use_imm={} rs2_src={}",
@@ -48,6 +47,46 @@ class Executor(Module):
         with Condition(write_enable):
             reg_avail[inst.rd] = Bits(1)(0)
 
+        result, store_value = self._execute_alu(inst, reg_file)
+        width_flags = self._decode_width(inst.mem_width)
+        byte_offset, word_index = self._validate_memory_access(
+            inst,
+            result,
+            data_offset,
+            data_bytes,
+            word_addr_width,
+            width_flags,
+        )
+        new_word = self._prepare_store_word(inst, store_value, width_flags, dcache, word_index, byte_offset)
+
+        dcache.build(we=inst.is_store, re=inst.is_load, addr=word_index, wdata=new_word)
+
+        log(
+            "toy-exec   | pc:0x{:08x} rd=x{:02} rs1=x{:02} rs2=x{:02} load={} store={} res=0x{:08x}",
+            pc_value,
+            inst.rd,
+            inst.rs1,
+            inst.rs2,
+            inst.is_load,
+            inst.is_store,
+            result,
+        )
+
+        memory.async_called(
+            rd=inst.rd,
+            exec_value=result,
+            write_enable=write_enable,
+            is_load=inst.is_load,
+            is_store=inst.is_store,
+            mem_width=inst.mem_width,
+            mem_unsigned=inst.mem_unsigned,
+            store_data=store_value,
+            pc_value=pc_value,
+            is_ebreak=inst.is_ebreak,
+            byte_offset=byte_offset,
+        )
+    
+    def _execute_alu(self, inst: Value, reg_file: Array):
         op_a = reg_file[inst.rs1]
         op_b = inst.use_imm.select(inst.imm, reg_file[inst.rs2])
         shamt = inst.use_shamt.select(inst.shamt, reg_file[inst.rs2][0:4])
@@ -65,19 +104,31 @@ class Executor(Module):
         results[AluOp.SLTU] = (op_a < op_b).select(Bits(32)(1), Bits(32)(0))
 
         result = inst.op_select.select1hot(*results)
-
         store_value = inst.rs2_is_source.select(reg_file[inst.rs2], Bits(32)(0))
+        return result, store_value
 
+    def _decode_width(self, mem_width: Value):
+        width_half = mem_width == Bits(2)(MemWidth.HALF)
+        width_word = mem_width == Bits(2)(MemWidth.WORD)
+        width_byte = mem_width == Bits(2)(MemWidth.BYTE)
+        return width_byte, width_half, width_word
+
+    def _validate_memory_access(
+        self,
+        inst: Value,
+        result: Value,
+        data_offset: int,
+        data_bytes: int,
+        word_addr_width: int,
+        width_flags: tuple[Value, Value, Value],
+    ):
+        width_byte, width_half, width_word = width_flags
         addr_uint = result.bitcast(UInt(32))
         base_uint = UInt(32)(data_offset & 0xFFFFFFFF)
         rel_uint = addr_uint - base_uint
         rel_bits = rel_uint.bitcast(Bits(32))
 
         total_bytes = UInt(32)(data_bytes)
-        width_half = inst.mem_width == Bits(2)(MemWidth.HALF)
-        width_word = inst.mem_width == Bits(2)(MemWidth.WORD)
-        width_byte = inst.mem_width == Bits(2)(MemWidth.BYTE)
-
         bytes_needed = UInt(32)(1)
         bytes_needed = width_half.select(UInt(32)(2), bytes_needed)
         bytes_needed = width_word.select(UInt(32)(4), bytes_needed)
@@ -106,8 +157,19 @@ class Executor(Module):
 
         upper_bit = 2 + max(word_addr_width - 1, 0)
         word_index = is_mem.select(rel_bits[2:upper_bit], Bits(word_addr_width)(0))
+        return byte_offset, word_index
 
-        shift_amount = (byte_offset.bitcast(UInt(2)) * UInt(5)(8)).bitcast(Bits(5))
+    def _prepare_store_word(
+        self,
+        inst: Value,
+        store_value: Value,
+        width_flags: tuple[Value, Value, Value],
+        dcache: Module,
+        word_index: Value,
+        byte_offset: Value,
+    ) -> Value:
+        width_byte, width_half, _ = width_flags
+        shift_amount = self._byte_shift(byte_offset)
         store_mask = Bits(32)(0xFFFFFFFF)
         store_mask = width_half.select(Bits(32)(0x0000FFFF), store_mask)
         store_mask = width_byte.select(Bits(32)(0x000000FF), store_mask)
@@ -116,32 +178,11 @@ class Executor(Module):
 
         word_value = dcache._payload[word_index].bitcast(Bits(32))
         new_word = (word_value & ~mask_shifted) | store_payload
-        new_word = inst.is_store.select(new_word, Bits(32)(0))
+        return inst.is_store.select(new_word, Bits(32)(0))
 
-        dcache.build(we=inst.is_store, re=inst.is_load, addr=word_index, wdata=new_word)
-
-        log(
-            "toy-exec   | pc:0x{:08x} rd=x{:02} rs1=x{:02} rs2=x{:02} load={} store={} res=0x{:08x}",
-            pc_value,
-            inst.rd,
-            inst.rs1,
-            inst.rs2,
-            inst.is_load,
-            inst.is_store,
-            result,
-        )
-
-        memory.async_called(
-            # the below 3 values are passed to wb, but first we need to pass it to memory
-            rd=inst.rd, 
-            exec_value=result,
-            write_enable=write_enable,
-            is_load=inst.is_load,
-            is_store=inst.is_store,
-            mem_width=inst.mem_width,
-            mem_unsigned=inst.mem_unsigned,
-            store_data=store_value,
-            pc_value=pc_value,
-            is_ebreak=inst.is_ebreak, # handle ebreak at wb
-            byte_offset=byte_offset,
-        )
+    def _byte_shift(self, offset: Value) -> Value:
+        shift = Bits(5)(0)
+        shift = (offset == Bits(2)(1)).select(Bits(5)(8), shift)
+        shift = (offset == Bits(2)(2)).select(Bits(5)(16), shift)
+        shift = (offset == Bits(2)(3)).select(Bits(5)(24), shift)
+        return shift
