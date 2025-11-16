@@ -3,7 +3,7 @@ To fully understand how Assassyn works, I plan to write several toy projects.
 - [x] Add
 - [x] Select1Hot
 - [x] Memory
-- [ ] Branch
+- [x] Branch
 
 # Note
 
@@ -11,7 +11,7 @@ When handling RAW Hazard, Assassyn would store the `async_called` in a FIFO. Whe
 
 # Add
 
-This is the simplest CPU that only support `add` and `addi` instructions. See [add/main.py](add/main.py) for more details. It is tested.
+This is the simplest CPU that only support `add` and `addi` instructions. See [add/main.py](add/main.py) for more details.
 
 Key points here:
 
@@ -21,7 +21,7 @@ Key points here:
 
 # Select1Hot
 
-Now the `exec` stage supports more instructions and uses a one-hot selection mechanism for choosing the value.
+Now the `exec` stage supports more instructions and uses a one-hot selection mechanism for choosing the value. See [select1hot/main.py](select1hot/main.py) for more details.
 
 It supports all the arithmetic instructions of RV32I, i.e., add, sub, sll, srl, sra, and, or, xor, slt, sltu, and their immediate variants.
 
@@ -32,16 +32,22 @@ Key points here:
 
 # Memory
 
-Implement all the memory instructions of RV32I, i.e., lb, lh, lw, lbu, lhu, sb, sh, sw.
+Implement all the memory instructions of RV32I, i.e., lb, lh, lw, lbu, lhu, sb, sh, sw. See [memory/main.py](memory/main.py) for more details.
 
 Key points here:
 
 - It uses `dcache` to model data memory (SRAM).
 - It handles load and store operations with proper alignment and access size.
 - Introduces new initialization for memory.
+- It seperates the modules from `main.py` to individual files to keep things organized.
 
 # Branch
 
 Implement all the branch instructions of RV32I, i.e., beq, bne, blt, bge, bltu, bgeu.
 
-No speculation, stall when can not resolve branches.
+No speculation, stall when can not resolve branches. See [branch/main.py](branch/main.py) for more details.
+
+Key points here:
+
+- It handles pipeline stalls and branch resolution without speculation.
+- It fixes the `Driver` and `Fetcher` Module to let the `Fetcher` hold the PC reg & ability to stop fetching instructions.
