@@ -26,7 +26,7 @@ class Decoder(Module):
         self,
         executor: Module,
         rdata: RegArray,
-        branch_inflight: Array
+        on_branch: Array
     ):
         pc_value = self.pop_all_ports(False)
 
@@ -44,11 +44,12 @@ class Decoder(Module):
         )
 
         with Condition(inst.is_branch):
-            branch_inflight[0] = Bits(1)(1)
+            on_branch[0] = Bits(1)(1)
 
-        exec_call = executor.async_called(inst=inst, pc_value=pc_value)
+        with Condition(~on_branch[0]):
+            exec_call = executor.async_called(inst=inst, pc_value=pc_value)
+        
         exec_call.bind.set_fifo_depth(inst=2)
-
 
 def _sign_extend_bits(value: Value, width: int, target: int = 32) -> Value:
     if width == target:
