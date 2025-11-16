@@ -2,7 +2,7 @@ To fully understand how Assassyn works, I plan to write several toy projects.
 
 - [x] Add
 - [x] Select1Hot
-- [ ] Memory
+- [x] Memory
 - [ ] Branch
 
 # Note
@@ -33,3 +33,15 @@ Key points here:
 # Memory
 
 Implement all the memory instructions of RV32I, i.e., lb, lh, lw, lbu, lhu, sb, sh, sw.
+
+Key points here:
+
+- It uses `dcache` to model data memory (SRAM).
+- It handles load and store operations with proper alignment and access size.
+- Introduces new initialization for memory.
+
+# Branch
+
+Implement all the branch instructions of RV32I, i.e., beq, bne, blt, bge, bltu, bgeu.
+
+No speculation, stall when can not resolve branches.
