@@ -1,0 +1,1 @@
+This directory contains the production-ready implementation of the RV32I CPU.
