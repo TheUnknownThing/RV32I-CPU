@@ -47,6 +47,8 @@ def build_cpu(
     config_file: Path | str | None = None,
     depth_log: int = 4,
     workspace: Path | str | None = None,
+    sim_threshold: int = 256,
+    idle_threshold: int = 256,
 ):
     """Build and elaborate the Naive memory-capable RV32I CPU."""
 
@@ -56,6 +58,8 @@ def build_cpu(
 
     if depth_log <= 0:
         raise ValueError("depth_log must be positive.")
+    if sim_threshold <= 0 or idle_threshold <= 0:
+        raise ValueError("Thresholds must be positive.")
 
     depth = 1 << depth_log
     if len(program_words) > depth:
@@ -148,8 +152,8 @@ def build_cpu(
     print(sys)
     conf = config(
         verilog=utils.has_verilator(),
-        sim_threshold=256,
-        idle_threshold=256,
+        sim_threshold=sim_threshold,
+        idle_threshold=idle_threshold,
         resource_base=str(workspace_path),
         fifo_depth=1,
     )
