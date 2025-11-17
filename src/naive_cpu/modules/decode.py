@@ -32,7 +32,10 @@ class Decoder(Module):
         executor: Module,
         rdata: RegArray,
         on_branch: Array,
+        on_hazard: Array,
     ):
+        wait_until(~on_hazard[0])
+        
         pc_value = self.pop_all_ports(False)
 
         raw_inst = rdata[0].bitcast(Bits(32))

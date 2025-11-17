@@ -20,6 +20,7 @@ class Executor(Module):
         data_bytes: int,
         word_addr_width: int,
         on_branch: Array,
+        on_hazard: Array,
         pc_reg: Array,
     ):
         inst = self.inst.peek()
@@ -33,6 +34,7 @@ class Executor(Module):
         rs2_avail = inst.rs2_is_source.select(reg_avail[inst.rs2], Bits(1)(1))
         operands_ready = rs1_avail & rs2_avail
         with Condition(~operands_ready):
+            on_hazard[0] = Bits(1)(1)
             log(
                 "naive-exec | hazard pc:0x{:08x} rd=x{:02} rs1=x{:02} rs2=x{:02} use_imm={} rs2_src={}",
                 pc_value,
@@ -44,6 +46,7 @@ class Executor(Module):
             )
 
         wait_until(operands_ready)
+        on_hazard[0] = Bits(1)(0)
         inst, pc_value = self.pop_all_ports(False)
 
         write_enable = inst.rd != Bits(5)(0)

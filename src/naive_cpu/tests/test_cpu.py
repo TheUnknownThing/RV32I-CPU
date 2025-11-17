@@ -32,6 +32,14 @@ WORKSPACE_ROOT = Path(__file__).parent / "workspace"
 
 CASES: Sequence[CpuCase] = [
     CpuCase(
+        name="many_hazards",
+        asm_file="many_hazards.asm",
+        expected_regs={
+            1: 0x00000405,
+        },
+        depth_log=7,
+    ),
+    CpuCase(
         name="arithmetic_suite",
         asm_file="arithmetic_suite.asm",
         expected_regs={

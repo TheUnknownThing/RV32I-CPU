@@ -85,12 +85,14 @@ def build_cpu(
         driver = Driver()
 
         on_branch = RegArray(Bits(1), 1, initializer=[0])
+        on_hazard = RegArray(Bits(1), 1, initializer=[0])
 
         pc_reg, pc_addr = fetcher.build(
             depth_log=depth_log,
             decoder=decoder,
             pc_offset=mem_config.pc_offset,
             on_branch=on_branch,
+            on_hazard=on_hazard,
             program_words=len(program_words),
         )
 
@@ -118,6 +120,7 @@ def build_cpu(
             executor=executor,
             rdata=icache.dout,
             on_branch=on_branch,
+            on_hazard=on_hazard,
         )
         executor.build(
             reg_file=reg_file,
@@ -128,6 +131,7 @@ def build_cpu(
             data_bytes=total_data_bytes,
             word_addr_width=word_addr_width,
             on_branch=on_branch,
+            on_hazard=on_hazard,
             pc_reg=pc_reg,
         )
         memory.build(
@@ -166,10 +170,6 @@ def run_cpu(
     sys, simulator_binary, verilog_path = build_cpu(program, **kwargs)
     sim_output = utils.run_simulator(binary_path=simulator_binary)
     return sim_output, verilog_path
-
-
-# Backwards compatibility shim for older tooling.
-run_branch_cpu = run_cpu
 
 
 if __name__ == "__main__":

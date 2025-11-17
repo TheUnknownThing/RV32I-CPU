@@ -16,8 +16,11 @@ class Fetcher(Module):
         decoder: Module,
         pc_offset: int,
         on_branch: Array,
+        on_hazard: Array,
         program_words: int,
     ):
+        wait_until(~on_hazard[0])
+
         pc_reg = RegArray(Bits(32), 1, initializer=[pc_offset & 0xFFFFFFFF])
         pc_value = pc_reg[0]
         pc_int = pc_value.bitcast(Int(32))
