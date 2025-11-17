@@ -135,6 +135,10 @@ class Executor(Module):
             )
             exec_bypass_reg[0] = inst.rd
             exec_bypass_data[0] = result
+        
+        with Condition(~(write_enable & inst.is_alu_instr)):
+            exec_bypass_reg[0] = Bits(5)(0)
+            exec_bypass_data[0] = Bits(32)(0)
 
         memory.async_called(
             rd=inst.rd,
