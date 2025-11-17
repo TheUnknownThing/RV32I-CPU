@@ -265,6 +265,11 @@ def _decode_instruction(instr: Value) -> Value:
     branch_cond = is_bltu.select(mask_branch(BranchCond.LTU), branch_cond)
     branch_cond = is_bgeu.select(mask_branch(BranchCond.GEU), branch_cond)
 
+    is_alu_instr = (
+        is_op
+        | is_op_imm
+    )
+
     log(
         "naive-decode | rd=x{:02} rs1=x{:02} rs2=x{:02} load={} store={} branch={} jump={} memw={} uns={} op=0x{:03x}",
         rd_value,
@@ -291,6 +296,7 @@ def _decode_instruction(instr: Value) -> Value:
         is_ebreak=is_ebreak,
         rs1_is_source=rs1_is_source,
         rs2_is_source=rs2_is_source,
+        is_alu_instr=is_alu_instr,
         is_load=is_load,
         is_store=is_store,
         is_branch=is_branch,
