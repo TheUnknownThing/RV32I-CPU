@@ -35,45 +35,44 @@ class Executor(Module):
         with Condition(~pred_correct[0]):
             log("naive-exec | Misprediction detected at pc=0x{:08x}", self.pc_value.peek())
             pred_correct[0] = Bits(1)(1)
-            inst, pc_value, pred_pc, pred_counter, do_prediction = self.pop_all_ports(False)
+
+        inst = self.inst.peek()
+        pc_value = self.pc_value.peek()
+        
+        with Condition(inst.is_ebreak):
+            x1_value = reg_file[Bits(5)(1)]
+            log("naive-exec | ebreak at pc: 0x{:08x}, x1=0x{:08x}", pc_value, x1_value)
+
+        rs1_avail = inst.rs1_is_source.select(
+            reg_avail[inst.rs1] 
+            | (exec_bypass_reg[0] == inst.rs1) 
+            | (mem_bypass_reg[0] == inst.rs1),
+            Bits(1)(1)
+        )
+        rs2_avail = inst.rs2_is_source.select(
+            reg_avail[inst.rs2] 
+            | (exec_bypass_reg[0] == inst.rs2) 
+            | (mem_bypass_reg[0] == inst.rs2),
+            Bits(1)(1)
+        )
+        operands_ready = rs1_avail & rs2_avail
+        with Condition(~operands_ready):
+            on_hazard[0] = Bits(1)(1)
+            log(
+                "naive-exec | hazard pc:0x{:08x} rd=x{:02} rs1=x{:02} rs2=x{:02} use_imm={} rs2_src={}",
+                pc_value,
+                inst.rd,
+                inst.rs1,
+                inst.rs2,
+                inst.use_imm,
+                inst.rs2_is_source,
+            )
+
+        wait_until(operands_ready)
+        on_hazard[0] = Bits(1)(0)
+        inst, pc_value, pred_pc, pred_counter, do_prediction = self.pop_all_ports(False)
 
         with Condition(pred_correct[0]):
-            inst = self.inst.peek()
-            pc_value = self.pc_value.peek()
-
-            with Condition(inst.is_ebreak):
-                x1_value = reg_file[Bits(5)(1)]
-                log("naive-exec | ebreak at pc: 0x{:08x}, x1=0x{:08x}", pc_value, x1_value)
-
-            rs1_avail = inst.rs1_is_source.select(
-                reg_avail[inst.rs1] 
-                | (exec_bypass_reg[0] == inst.rs1) 
-                | (mem_bypass_reg[0] == inst.rs1),
-                Bits(1)(1)
-            )
-            rs2_avail = inst.rs2_is_source.select(
-                reg_avail[inst.rs2] 
-                | (exec_bypass_reg[0] == inst.rs2) 
-                | (mem_bypass_reg[0] == inst.rs2),
-                Bits(1)(1)
-            )
-            operands_ready = rs1_avail & rs2_avail
-            with Condition(~operands_ready):
-                on_hazard[0] = Bits(1)(1)
-                log(
-                    "naive-exec | hazard pc:0x{:08x} rd=x{:02} rs1=x{:02} rs2=x{:02} use_imm={} rs2_src={}",
-                    pc_value,
-                    inst.rd,
-                    inst.rs1,
-                    inst.rs2,
-                    inst.use_imm,
-                    inst.rs2_is_source,
-                )
-
-            wait_until(operands_ready)
-            on_hazard[0] = Bits(1)(0)
-            inst, pc_value, pred_pc, pred_counter, do_prediction = self.pop_all_ports(False)
-
             write_enable = inst.rd != Bits(5)(0)
             with Condition(write_enable):
                 reg_avail[inst.rd] = Bits(1)(0)
@@ -138,19 +137,27 @@ class Executor(Module):
                 #     pc_reg[0] = branch_target_value
                 # with Condition(~branch_taken):
                 #     pc_reg[0] = (pc_value.bitcast(Int(32)) + Int(32)(4)).bitcast(Bits(32))
-                
+                    
                 pred_correct[0] = (pred_pc == branch_target_value).select(Bits(1)(1), Bits(1)(0))
                 on_branch[0] = Bits(1)(1) # because we need to update BTB
                 pc_reg[0] = branch_taken.select(
                     branch_target_value,
                     (pc_value.bitcast(Int(32)) + Int(32)(4)).bitcast(Bits(32))
                 )
-                new_pred_counter = self._update_pred_counter(pred_counter, branch_taken)
+                
+                # update pred counter
+                new_pred_counter = RegArray(Bits(2), 1, initializer=[0])
+                with Condition(branch_taken & (pred_counter != Bits(2)(3))):
+                    new_pred_counter[0] = pred_counter + Bits(2)(1)
+
+                with Condition(~branch_taken & (pred_counter != Bits(2)(0))):
+                    new_pred_counter[0] = pred_counter - Bits(2)(1)
+                
                 btb_wdata_reg[0] = branch_taken.select(
-                    concat(Bits(1)(1), pc_value.bitcast(Bits(32))[10:31], branch_target_value, new_pred_counter),
-                    concat(Bits(1)(1), pc_value.bitcast(Bits(32))[10:31], (pc_value.bitcast(Int(32)) + Int(32)(4)).bitcast(Bits(32)), new_pred_counter)
+                    concat(Bits(1)(1), pc_value.bitcast(Bits(32))[10:31], branch_target_value, new_pred_counter[0]),
+                    concat(Bits(1)(1), pc_value.bitcast(Bits(32))[10:31], (pc_value.bitcast(Int(32)) + Int(32)(4)).bitcast(Bits(32)), new_pred_counter[0])
                 )
-                btb_addr_reg[0] = pc_value.bitcast(Bits(32))[2:10]
+                btb_addr_reg[0] = pc_value.bitcast(Bits(32))[2:9]
 
                 log(
                     "naive-branch | pc:0x{:08x} rs1=x{:02} rs2=x{:02} taken={} target=0x{:08x}",
@@ -190,7 +197,7 @@ class Executor(Module):
                 )
                 exec_bypass_reg[0] = inst.rd
                 exec_bypass_data[0] = result
-            
+                
             with Condition(~(write_enable & inst.is_alu_instr)):
                 exec_bypass_reg[0] = Bits(5)(0)
                 exec_bypass_data[0] = Bits(32)(0)
@@ -331,12 +338,4 @@ class Executor(Module):
         shift = (offset == Bits(2)(2)).select(Bits(5)(16), shift)
         shift = (offset == Bits(2)(3)).select(Bits(5)(24), shift)
         return shift
-    
-    def _update_pred_counter(self, counter: Value, taken: Value) -> Value:
-        """Update 2-bit saturating counter based on branch outcome."""
-        new_counter = counter
-        with Condition(taken & (counter != Bits(2)(3))):
-            new_counter = counter + Bits(2)(1)
-        with Condition(~taken & (counter != Bits(2)(0))):
-            new_counter = counter - Bits(2)(1)
-        return new_counter
+

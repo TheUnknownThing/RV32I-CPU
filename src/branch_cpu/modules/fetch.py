@@ -19,9 +19,20 @@ class Fetcher(Module):
         on_hazard: Array,
         program_words: int,
         btb_addr_reg: Array,
+        btb_write_reg: Array,
+        btb_wdata_reg: Array,
         bcache: Module,
     ):
         wait_until(~on_hazard[0])
+
+        write_mode = on_branch[0]
+        bcache_addr = write_mode.select(btb_write_reg[0], btb_addr_reg[0])
+        bcache.build(
+            we=write_mode,
+            re=~write_mode,
+            addr=bcache_addr,
+            wdata=btb_wdata_reg[0],
+        )
 
         pc_reg = RegArray(Bits(32), 1, initializer=[pc_offset & 0xFFFFFFFF])
         pc_value = pc_reg[0]
@@ -42,27 +53,27 @@ class Fetcher(Module):
             on_branch[0] = Bits(1)(0)
 
         with Condition(do_fetch):
-            log("naive-fetch | fetch | pc=0x{:08x} busy={} ", pc_value)
+            log("naive-fetch | fetch | pc=0x{:08x} busy={} ", pc_value, write_mode)
 
             btb_out = bcache.dout[0].bitcast(Bits(57))
-            btb_valid = btb_out[0]
-            btb_tag = btb_out[1:23]
-            btb_target = btb_out[23:55]
-            btb_counter = btb_out[55:57]
+            btb_valid = btb_out[0:0]
+            btb_tag = btb_out[1:22]
+            btb_target = btb_out[23:54]
+            btb_counter = btb_out[55:56]
 
-            with Condition(btb_valid & (btb_tag == pc_int[10:32])):
+            with Condition(btb_valid & (btb_tag == pc_int[10:31])):
                 log("naive-fetch | branch btb hit pc=0x{:08x} target=0x{:08x}", pc_value, btb_target)
                 pc_reg[0] = btb_target
-                btb_addr_reg[0] = btb_target[2:10]
+                btb_addr_reg[0] = btb_target[2:9]
 
-            with Condition(~(btb_valid & (btb_tag == pc_int[10:32]))):
+            with Condition(~(btb_valid & (btb_tag == pc_int[10:31]))):
                 next_pc = (pc_int + Int(32)(4)).bitcast(Bits(32))
                 pc_reg[0] = next_pc
-                btb_addr_reg[0] = next_pc[2:10]
+                btb_addr_reg[0] = next_pc[2:9]
             
             decoder.async_called(pc_value=pc_value, do_prediction=btb_valid,pred_pc=btb_target, pred_counter=btb_counter)
 
         with Condition(~do_fetch):
-            log("naive-fetch | stalled | pc=0x{:08x} busy={}", pc_value)
+            log("naive-fetch | stalled | pc=0x{:08x} busy={}", pc_value, write_mode)
 
         return pc_reg, pc_addr

@@ -105,13 +105,6 @@ def build_cpu(
         """
         bcache = SRAM(width=57, depth=256, init_file=None)  # BTB
         bcache.name = "btb"
-        bcache.build(
-            we=on_branch[0],
-            re=~on_branch[0],
-            # btb_addr is equal to pc[10:2] most of the time, but set to branch instruction addr when writing
-            addr=on_branch[0].select(btb_write_reg[0], btb_read_reg[0]),
-            wdata=btb_wdata_reg[0], # wdata constructed by executor
-        )
 
         pc_reg, pc_addr = fetcher.build(
             depth_log=depth_log,
@@ -121,6 +114,8 @@ def build_cpu(
             on_hazard=on_hazard,
             program_words=len(program_words),
             btb_addr_reg=btb_read_reg,
+            btb_write_reg=btb_write_reg,
+            btb_wdata_reg=btb_wdata_reg,
             bcache=bcache,
         )
 
@@ -153,7 +148,6 @@ def build_cpu(
         decoder.build(
             executor=executor,
             rdata=icache.dout,
-            on_branch=on_branch,
             on_hazard=on_hazard,
             pred_correct=pred_correct,
         )
