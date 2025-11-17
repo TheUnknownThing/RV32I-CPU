@@ -38,6 +38,9 @@ class Fetcher(Module):
 
         do_fetch = has_remaining
 
+        with Condition(on_branch[0]):
+            on_branch[0] = Bits(1)(0)
+
         with Condition(do_fetch):
             log("naive-fetch | fetch | pc=0x{:08x} busy={} ", pc_value)
 
@@ -49,14 +52,15 @@ class Fetcher(Module):
 
             with Condition(btb_valid & (btb_tag == pc_int[10:32])):
                 log("naive-fetch | branch btb hit pc=0x{:08x} target=0x{:08x}", pc_value, btb_target)
-                pass # TODO: implement branch prediction target
+                pc_reg[0] = btb_target
+                btb_addr_reg[0] = btb_target[2:10]
 
             with Condition(~(btb_valid & (btb_tag == pc_int[10:32]))):
                 next_pc = (pc_int + Int(32)(4)).bitcast(Bits(32))
                 pc_reg[0] = next_pc
                 btb_addr_reg[0] = next_pc[2:10]
             
-            decoder.async_called(pc_value=pc_value, pred_pc=btb_target, pred_counter=btb_counter)
+            decoder.async_called(pc_value=pc_value, do_prediction=btb_valid,pred_pc=btb_target, pred_counter=btb_counter)
 
         with Condition(~do_fetch):
             log("naive-fetch | stalled | pc=0x{:08x} busy={}", pc_value)

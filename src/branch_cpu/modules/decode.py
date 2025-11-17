@@ -25,7 +25,8 @@ class Decoder(Module):
     def __init__(self):
         super().__init__(ports={"pc_value": Port(Bits(32)),
                                 "pred_pc": Port(Bits(32)),
-                                "pred_counter": Port(Bits(2))})
+                                "pred_counter": Port(Bits(2)),
+                                "do_prediction": Port(Bits(1))})
         self.name = "Decoder"
 
     @module.combinational
@@ -35,32 +36,39 @@ class Decoder(Module):
         rdata: Array,
         on_branch: Array,
         on_hazard: Array,
+        pred_correct: Array,
     ):
-        wait_until(~on_hazard[0])
+        with Condition(pred_correct[0]):
+            wait_until(~on_hazard[0])
+            
+            pc_value, pred_pc, pred_counter, do_prediction = self.pop_all_ports(False)
+
+            raw_inst = rdata[0].bitcast(Bits(32))
+            inst = _decode_instruction(raw_inst)
+            log(
+                "naive-decode | pc=0x{:08x} rd=x{:02} rs1=x{:02} rs2=x{:02} load={} store={} br={} jump={}",
+                pc_value,
+                inst.rd,
+                inst.rs1,
+                inst.rs2,
+                inst.is_load,
+                inst.is_store,
+                inst.is_branch,
+                inst.is_jump,
+            )
+
+            with Condition(inst.is_branch | inst.is_jump):
+                on_branch[0] = Bits(1)(1)
+
+            with Condition(~on_branch[0]):
+                exec_call = executor.async_called(inst=inst, pc_value=pc_value, pred_pc=pred_pc, pred_counter=pred_counter, do_prediction=do_prediction)
+
+            exec_call.bind.set_fifo_depth(inst=2)
         
-        pc_value, pred_pc = self.pop_all_ports(False)
-
-        raw_inst = rdata[0].bitcast(Bits(32))
-        inst = _decode_instruction(raw_inst)
-        log(
-            "naive-decode | pc=0x{:08x} rd=x{:02} rs1=x{:02} rs2=x{:02} load={} store={} br={} jump={}",
-            pc_value,
-            inst.rd,
-            inst.rs1,
-            inst.rs2,
-            inst.is_load,
-            inst.is_store,
-            inst.is_branch,
-            inst.is_jump,
-        )
-
-        with Condition(inst.is_branch | inst.is_jump):
-            on_branch[0] = Bits(1)(1)
-
-        with Condition(~on_branch[0]):
-            exec_call = executor.async_called(inst=inst, pc_value=pc_value, pred_pc=pred_pc, pred_counter=self.pred_counter.peek())
-
-        exec_call.bind.set_fifo_depth(inst=2)
+        # otherwise consume the instr, it is wrong path
+        with Condition(~pred_correct[0]):
+            pc_value, pred_pc, pred_counter, do_prediction = self.pop_all_ports(False)
+            log("naive-decode | wrong path pc=0x{:08x}, discarding instruction", pc_value)
 
 
 def _sign_extend_bits(value: Value, width: int, target: int = 32) -> Value:

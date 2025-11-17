@@ -92,9 +92,10 @@ def build_cpu(
         on_branch = RegArray(Bits(1), 1, initializer=[0])
         on_hazard = RegArray(Bits(1), 1, initializer=[0])
 
-        btb_addr_reg = RegArray(Bits(8), 1, initializer=[0])
+        btb_read_reg = RegArray(Bits(8), 1, initializer=[0])
+        btb_write_reg = RegArray(Bits(8), 1, initializer=[0])
         btb_wdata_reg = RegArray(Bits(57), 1, initializer=[0])
-        pred_correct = RegArray(Bits(1), 1, initializer=[0])
+        pred_correct = RegArray(Bits(1), 1, initializer=[1])
 
         """
         valid        : 1 bit
@@ -102,13 +103,13 @@ def build_cpu(
         target_pc    : 32 bits
         counter      : 2 bits     // 2-bit predictor
         """
-        bcache = SRAM(width=57, depth=256, init_file="")  # BTB
+        bcache = SRAM(width=57, depth=256, init_file=None)  # BTB
         bcache.name = "btb"
         bcache.build(
             we=on_branch[0],
             re=~on_branch[0],
-            # btb_addr is equal to pc[10:2] most of the time, but set to branch instruction addr during branch
-            addr=btb_addr_reg[0],
+            # btb_addr is equal to pc[10:2] most of the time, but set to branch instruction addr when writing
+            addr=on_branch[0].select(btb_write_reg[0], btb_read_reg[0]),
             wdata=btb_wdata_reg[0], # wdata constructed by executor
         )
 
@@ -119,7 +120,7 @@ def build_cpu(
             on_branch=on_branch,
             on_hazard=on_hazard,
             program_words=len(program_words),
-            btb_addr_reg=btb_addr_reg,
+            btb_addr_reg=btb_read_reg,
             bcache=bcache,
         )
 
@@ -154,6 +155,7 @@ def build_cpu(
             rdata=icache.dout,
             on_branch=on_branch,
             on_hazard=on_hazard,
+            pred_correct=pred_correct,
         )
         executor.build(
             reg_file=reg_file,
@@ -171,6 +173,7 @@ def build_cpu(
             mem_bypass_reg=mem_bypass_reg,
             mem_bypass_data=mem_bypass_data,
             pred_correct=pred_correct,
+            btb_addr_reg=btb_write_reg,
             btb_wdata_reg=btb_wdata_reg,
         )
         memory.build(
