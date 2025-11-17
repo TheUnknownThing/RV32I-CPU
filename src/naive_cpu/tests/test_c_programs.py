@@ -65,6 +65,31 @@ C_CASES = [
         },
         depth_log=7,
     ),
+    CProgramCase(
+        name="multiply_c",
+        sources=[CASE_DIR / "multiply.c"],
+        expected_reports={
+            1: 0x000F76A0,
+            2: 0x00000000,
+        },
+        depth_log=7,
+        sim_threshold=32768,
+        idle_threshold=32768,
+    ),
+    CProgramCase(
+        name="vvadd_c",
+        sources=[CASE_DIR / "vvadd.c"],
+        expected_reports={
+            1: 0x000000C9,
+            2: 0x00000000,
+            3: 0x00000367,
+            4: 0x00000000,
+        },
+        depth_log=7,
+        sim_threshold=32768,
+        idle_threshold=32768,
+        options=CToolchainOptions(dmem_bytes=16384, stack_bytes=2048),
+    ),
 ]
 
 

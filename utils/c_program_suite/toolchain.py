@@ -304,6 +304,14 @@ def _extract_images(
             if value is not None:
                 metadata[symbol] = value
 
+        # Some aggressively optimized programs may not reference the
+        # '__test_report_slots' symbol at link time, so ld elides it from the
+        # symbol table even though the runtime ABI still relies on the slot
+        # count. Fall back to the configured value so downstream consumers can
+        # always discover the expected report layout.
+        if "__test_report_slots" not in metadata:
+            metadata["__test_report_slots"] = opts.report_slots
+
     program_words = _bytes_to_words(text_image)
     data_words = _bytes_to_words(data_image)
     return program_words, data_words, metadata

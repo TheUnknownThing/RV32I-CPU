@@ -165,6 +165,22 @@ def build_cpu(
     return sys, simulator_binary, verilog_path
 
 
+def default_build_cpu():
+    # pass `ebreak` to build
+    WORKSPACE_ROOT = Path(__file__).parent / "workspace"
+    workspace = WORKSPACE_ROOT / "default"
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    program_words = [0x00100073] # ebreak
+
+    return run_cpu(
+        program=program_words,
+        data_image=None,
+        workspace=workspace,
+        depth_log=6,
+    )
+
+
 def run_cpu(
     program: Sequence[int] | Iterable[int] | Path | str | None = None,
     **kwargs,
@@ -177,5 +193,6 @@ def run_cpu(
 
 
 if __name__ == "__main__":
-    sys, simulator_binary, verilog_path = build_cpu()
+    simulator_binary, verilog_path = default_build_cpu()
+    utils.run_verilator(verilog_path)
     print("Naive RV32I CPU built successfully!")
