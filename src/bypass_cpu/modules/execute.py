@@ -22,6 +22,8 @@ class Executor(Module):
         pc_reg: Array,
         exec_bypass_reg: Array,
         exec_bypass_data: Array,
+        mem_bypass_reg: Array,
+        mem_bypass_data: Array,
     ):
         inst = self.inst.peek()
         pc_value = self.pc_value.peek()
@@ -30,8 +32,18 @@ class Executor(Module):
             x1_value = reg_file[Bits(5)(1)]
             log("naive-exec | ebreak at pc: 0x{:08x}, x1=0x{:08x}", pc_value, x1_value)
 
-        rs1_avail = inst.rs1_is_source.select(reg_avail[inst.rs1] | (exec_bypass_reg[0] == inst.rs1), Bits(1)(1))
-        rs2_avail = inst.rs2_is_source.select(reg_avail[inst.rs2] | (exec_bypass_reg[0] == inst.rs2), Bits(1)(1))
+        rs1_avail = inst.rs1_is_source.select(
+            reg_avail[inst.rs1] 
+            | (exec_bypass_reg[0] == inst.rs1) 
+            | (mem_bypass_reg[0] == inst.rs1),
+            Bits(1)(1)
+        )
+        rs2_avail = inst.rs2_is_source.select(
+            reg_avail[inst.rs2] 
+            | (exec_bypass_reg[0] == inst.rs2) 
+            | (mem_bypass_reg[0] == inst.rs2),
+            Bits(1)(1)
+        )
         operands_ready = rs1_avail & rs2_avail
         with Condition(~operands_ready):
             on_hazard[0] = Bits(1)(1)
@@ -53,8 +65,24 @@ class Executor(Module):
         with Condition(write_enable):
             reg_avail[inst.rd] = Bits(1)(0)
 
-        rs1_value = inst.rs1_is_source.select((exec_bypass_reg[0] == inst.rs1).select(exec_bypass_data[0], reg_file[inst.rs1]), Bits(32)(0))
-        rs2_value = inst.rs2_is_source.select((exec_bypass_reg[0] == inst.rs2).select(exec_bypass_data[0], reg_file[inst.rs2]), Bits(32)(0))
+        rs1_value = inst.rs1_is_source.select(
+            (exec_bypass_reg[0] == inst.rs1).select(
+                exec_bypass_data[0], 
+                (mem_bypass_reg[0] == inst.rs1).select(
+                    mem_bypass_data[0], 
+                    reg_file[inst.rs1]
+                )),
+                Bits(32)(0)
+        )
+        rs2_value = inst.rs2_is_source.select(
+            (exec_bypass_reg[0] == inst.rs2).select(
+                exec_bypass_data[0],
+                (mem_bypass_reg[0] == inst.rs2).select(
+                    mem_bypass_data[0], 
+                    reg_file[inst.rs2]
+                )), 
+            Bits(32)(0)
+        )
         result, store_value = self._execute_alu(inst, rs1_value, rs2_value, pc_value)
         width_flags = self._decode_width(inst.mem_width)
         byte_offset, word_index = self._validate_memory_access(

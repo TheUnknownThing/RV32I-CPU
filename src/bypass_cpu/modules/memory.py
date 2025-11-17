@@ -24,7 +24,7 @@ class MemoryAccess(Module):
         self.name = "Memory"
 
     @module.combinational
-    def build(self, dout: RegArray, wb: Module):
+    def build(self, dout: Array, wb: Module, mem_bypass_reg: Array, mem_bypass_data: Array):
         (
             rd,
             exec_value,
@@ -72,6 +72,14 @@ class MemoryAccess(Module):
 
         result_value = is_load.select(load_value, exec_value)
         final_write = write_enable & ~is_store
+        
+        with Condition(final_write):
+            mem_bypass_reg[0] = rd
+            mem_bypass_data[0] = result_value
+
+        with Condition(~final_write):
+            mem_bypass_reg[0] = Bits(5)(0)
+            mem_bypass_data[0] = Bits(32)(0)
 
         wb.async_called(rd=rd, value=result_value, enable=final_write, is_ebreak=is_ebreak)
 

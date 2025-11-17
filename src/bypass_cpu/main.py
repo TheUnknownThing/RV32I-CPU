@@ -107,6 +107,9 @@ def build_cpu(
         exec_bypass_reg = RegArray(Bits(5), 1, initializer=[0])
         exec_bypass_data = RegArray(Bits(32), 1, initializer=[0])
 
+        mem_bypass_reg = RegArray(Bits(5), 1, initializer=[0])
+        mem_bypass_data = RegArray(Bits(32), 1, initializer=[0])
+
         icache = SRAM(width=32, depth=depth, init_file=str(program_image))
         icache.name = "bypass_memory_icache"
         icache.build(
@@ -143,10 +146,14 @@ def build_cpu(
             pc_reg=pc_reg,
             exec_bypass_reg=exec_bypass_reg,
             exec_bypass_data=exec_bypass_data,
+            mem_bypass_reg=mem_bypass_reg,
+            mem_bypass_data=mem_bypass_data,
         )
         memory.build(
             dout=dcache.dout,
             wb=writeback,
+            mem_bypass_reg=mem_bypass_reg,
+            mem_bypass_data=mem_bypass_data,
         )
         writeback.build(reg_file=reg_file, reg_avail=reg_avail)
 
