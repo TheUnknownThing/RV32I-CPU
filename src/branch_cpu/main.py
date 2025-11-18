@@ -9,7 +9,20 @@ from assassyn.frontend import *  # noqa: F401,F403
 from assassyn.backend import *  # noqa: F401,F403
 from assassyn import utils
 
-from ..naive_cpu.common import AluOp, MemWidth, decoded_instr  # noqa: F401
+from .common import (
+    BTB_ENTRY_BITS,
+    BTB_INDEX_BITS,
+    SPEC_TAG_BITS,
+    AluOp,
+    MemWidth,
+    decoded_instr,
+)  # noqa: F401
+from .modules.decode import Decoder
+from .modules.fetch import Fetcher
+from .modules.execute import Executor
+
+from ..naive_cpu.modules.memory import MemoryAccess
+from ..naive_cpu.modules.writeback import WriteBack
 from ..naive_cpu.program import (
     memory_address_width,
     normalize_data_image,
@@ -18,12 +31,6 @@ from ..naive_cpu.program import (
     write_program_image,
     bytes_to_words,
 )
-from ..naive_cpu.modules.writeback import WriteBack
-
-from .modules.fetch import Fetcher
-from .modules.decode import Decoder
-from .modules.execute import Executor
-from .modules.memory import MemoryAccess
 
 
 class Driver(Module):
@@ -89,44 +96,33 @@ def build_cpu(
         writeback = WriteBack()
         driver = Driver()
 
-        on_branch = RegArray(Bits(1), 1, initializer=[0])
         on_hazard = RegArray(Bits(1), 1, initializer=[0])
+        branch_mispredict = RegArray(Bits(1), 1, initializer=[0])
+        correct_pc = RegArray(Bits(32), 1, initializer=[mem_config.pc_offset & 0xFFFFFFFF])
+        btb_write_enable = RegArray(Bits(1), 1, initializer=[0])
+        btb_write_index = RegArray(Bits(BTB_INDEX_BITS), 1, initializer=[0])
+        btb_write_data = RegArray(Bits(BTB_ENTRY_BITS), 1, initializer=[0])
 
-        btb_read_reg = RegArray(Bits(8), 1, initializer=[0])
-        btb_write_reg = RegArray(Bits(8), 1, initializer=[0])
-        btb_wdata_reg = RegArray(Bits(57), 1, initializer=[0])
-        pred_correct = RegArray(Bits(1), 1, initializer=[1])
-
-        """
-        valid        : 1 bit
-        tag          : 22 bits    // PC[31:10]
-        target_pc    : 32 bits
-        counter      : 2 bits     // 2-bit predictor
-        """
-        bcache = SRAM(width=57, depth=256, init_file=None)  # BTB
-        bcache.name = "btb"
+        btb = SRAM(width=BTB_ENTRY_BITS, depth=1 << BTB_INDEX_BITS, init_file=None)
+        btb.name = "branch_btb"
+        spec_tag = RegArray(Bits(SPEC_TAG_BITS), 1, initializer=[0])
 
         pc_reg, pc_addr = fetcher.build(
             depth_log=depth_log,
             decoder=decoder,
             pc_offset=mem_config.pc_offset,
-            on_branch=on_branch,
             on_hazard=on_hazard,
             program_words=len(program_words),
-            btb_addr_reg=btb_read_reg,
-            btb_write_reg=btb_write_reg,
-            btb_wdata_reg=btb_wdata_reg,
-            bcache=bcache,
+            branch_mispredict=branch_mispredict,
+            correct_pc=correct_pc,
+            btb=btb,
+            btb_write_enable=btb_write_enable,
+            btb_write_index=btb_write_index,
+            btb_write_data=btb_write_data,
         )
 
         reg_file = RegArray(Bits(32), 32, initializer=[0] * 32)
         reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32)
-
-        exec_bypass_reg = RegArray(Bits(5), 1, initializer=[0])
-        exec_bypass_data = RegArray(Bits(32), 1, initializer=[0])
-
-        mem_bypass_reg = RegArray(Bits(5), 1, initializer=[0])
-        mem_bypass_data = RegArray(Bits(32), 1, initializer=[0])
 
         icache = SRAM(width=32, depth=depth, init_file=str(program_image))
         icache.name = "memory_icache"
@@ -149,7 +145,8 @@ def build_cpu(
             executor=executor,
             rdata=icache.dout,
             on_hazard=on_hazard,
-            pred_correct=pred_correct,
+            branch_mispredict=branch_mispredict,
+            spec_tag=spec_tag,
         )
         executor.build(
             reg_file=reg_file,
@@ -159,22 +156,17 @@ def build_cpu(
             data_offset=mem_config.data_offset,
             data_bytes=total_data_bytes,
             word_addr_width=word_addr_width,
-            on_branch=on_branch,
             on_hazard=on_hazard,
-            pc_reg=pc_reg,
-            exec_bypass_reg=exec_bypass_reg,
-            exec_bypass_data=exec_bypass_data,
-            mem_bypass_reg=mem_bypass_reg,
-            mem_bypass_data=mem_bypass_data,
-            pred_correct=pred_correct,
-            btb_addr_reg=btb_write_reg,
-            btb_wdata_reg=btb_wdata_reg,
+            branch_mispredict=branch_mispredict,
+            correct_pc=correct_pc,
+            btb_write_enable=btb_write_enable,
+            btb_write_index=btb_write_index,
+            btb_write_data=btb_write_data,
+            spec_tag=spec_tag,
         )
         memory.build(
             dout=dcache.dout,
             wb=writeback,
-            mem_bypass_reg=mem_bypass_reg,
-            mem_bypass_data=mem_bypass_data,
         )
         writeback.build(reg_file=reg_file, reg_avail=reg_avail)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from assassyn.frontend import *
 
-from ..common import AluOp, MemWidth, BranchCond, decoded_instr
+from ..common import AluOp, MemWidth, BranchCond, decoded_instr, fetch_prediction
 
 OPCODE_OP = 0b0110011
 OPCODE_OPIMM = 0b0010011
@@ -23,10 +23,7 @@ class Decoder(Module):
     """Decodes RV32I instructions into the compact bundle used downstream."""
 
     def __init__(self):
-        super().__init__(ports={"pc_value": Port(Bits(32)),
-                                "pred_pc": Port(Bits(32)),
-                                "pred_counter": Port(Bits(2)),
-                                "do_prediction": Port(Bits(1))})
+        super().__init__(ports={"pc_value": Port(Bits(32)), "fetch_meta": Port(fetch_prediction)})
         self.name = "Decoder"
 
     @module.combinational
@@ -35,14 +32,15 @@ class Decoder(Module):
         executor: Module,
         rdata: Array,
         on_hazard: Array,
-        pred_correct: Array,
+        branch_mispredict: Array,
+        spec_tag: Array,
     ):
         wait_until(~on_hazard[0])
-        
-        pc_value, pred_pc, pred_counter, do_prediction = self.pop_all_ports(False)
+
+        pc_value, fetch_meta = self.pop_all_ports(False)
 
         raw_inst = rdata[0].bitcast(Bits(32))
-        inst = _decode_instruction(raw_inst)
+        inst = _decode_instruction(raw_inst, spec_tag[0])
         log(
             "naive-decode | pc=0x{:08x} rd=x{:02} rs1=x{:02} rs2=x{:02} load={} store={} br={} jump={}",
             pc_value,
@@ -55,16 +53,19 @@ class Decoder(Module):
             inst.is_jump,
         )
 
-        with Condition(pred_correct[0]):
-            exec_call = executor.async_called(
-                inst=inst,
-                pc_value=pc_value,
-                pred_pc=pred_pc,
-                pred_counter=pred_counter,
-                do_prediction=do_prediction,
+        flush_decode = branch_mispredict[0]
+
+        with Condition(flush_decode):
+            log(
+                "branch-decode | flush | pc=0x{:08x} hit={} predict_taken={}",
+                pc_value,
+                fetch_meta.btb_hit,
+                fetch_meta.predict_taken,
             )
 
-        exec_call.bind.set_fifo_depth(inst=2)
+        with Condition(~flush_decode):
+            exec_call = executor.async_called(inst=inst, pc_value=pc_value, branch_meta=fetch_meta)
+            exec_call.bind.set_fifo_depth(inst=2)
 
 
 def _sign_extend_bits(value: Value, width: int, target: int = 32) -> Value:
@@ -76,7 +77,7 @@ def _sign_extend_bits(value: Value, width: int, target: int = 32) -> Value:
     return concat(pad, value)
 
 
-def _decode_instruction(instr: Value) -> Value:
+def _decode_instruction(instr: Value, spec_tag_value: Value) -> Value:
     """Decode a raw 32-bit instruction into the decoded_instr bundle."""
 
     opcode = instr[0:6]
@@ -263,7 +264,7 @@ def _decode_instruction(instr: Value) -> Value:
     rd_value = (is_store | is_branch).select(Bits(5)(0), rd)
 
     mask_branch = lambda cond: Bits(BranchCond.COUNT)(1 << cond)
-    branch_cond = Bits(BranchCond.COUNT)(0)
+    branch_cond = mask_branch(BranchCond.EQ)
     branch_cond = is_beq.select(mask_branch(BranchCond.EQ), branch_cond)
     branch_cond = is_bne.select(mask_branch(BranchCond.NE), branch_cond)
     branch_cond = is_blt.select(mask_branch(BranchCond.LT), branch_cond)
@@ -295,6 +296,7 @@ def _decode_instruction(instr: Value) -> Value:
         rs2=rs2,
         rd=rd_value,
         imm=imm,
+        spec_tag=spec_tag_value,
         shamt=shamt,
         op_select=op_select,
         use_imm=use_imm,
