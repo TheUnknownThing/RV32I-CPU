@@ -136,12 +136,27 @@ def test_cpu_cases(case: CpuCase):
     workspace = WORKSPACE_ROOT / case.name
     workspace.mkdir(parents=True, exist_ok=True)
 
-    sim_output, _ = run_cpu(
-        program=program_words,
-        data_image=data_path,
-        workspace=workspace,
-        depth_log=case.depth_log,
-    )
+    try:
+        sim_output, _ = run_cpu(
+            program=program_words,
+            data_image=data_path,
+            workspace=workspace,
+            depth_log=case.depth_log,
+        )
+    except Exception as exc:
+        # try to recover any output from common exception attributes
+        sim_output = ""
+        for attr in ("output", "stdout", "sim_output"):
+            if hasattr(exc, attr):
+                val = getattr(exc, attr)
+                if val:
+                    sim_output = val.decode(errors="replace") if isinstance(val, (bytes, bytearray)) else str(val)
+                    break
+        if not sim_output:
+            sim_output = f"run_cpu raised {type(exc).__name__}: {exc}"
+        (workspace / "sim.log").write_text(sim_output)
+        print(sim_output)
+        pytest.fail(f"run_cpu failed with {type(exc).__name__}: {exc}")
 
     (workspace / "sim.log").write_text(sim_output)
 
