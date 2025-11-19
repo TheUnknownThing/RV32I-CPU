@@ -20,7 +20,7 @@ class Executor(Module):
     def __init__(self):
         super().__init__(
             ports={
-                "inst": Port(decoded_instr),
+                "instr": Port(decoded_instr),
                 "pc_value": Port(Bits(32)),
                 "branch_meta": Port(fetch_prediction),
             }
@@ -49,7 +49,7 @@ class Executor(Module):
         mem_bypass_reg: Array,
         mem_bypass_data: Array,
     ):
-        inst_peek = self.inst.peek()
+        inst_peek = self.instr.peek()
         pc_peek = self.pc_value.peek()
         current_tag = spec_tag[0]
         stale = inst_peek.spec_tag != current_tag
@@ -143,12 +143,12 @@ class Executor(Module):
             inst_is_load,
             inst_is_store,
         )
+        current_word = dcache.dout[0].bitcast(Bits(32))
         new_word = self._prepare_store_word(
             inst,
             store_value,
             width_flags,
-            dcache,
-            word_index,
+            current_word,
             byte_offset,
             inst_is_store,
         )
@@ -366,8 +366,7 @@ class Executor(Module):
         inst: Value,
         store_value: Value,
         width_flags: tuple[Value, Value, Value],
-        dcache: Module,
-        word_index: Value,
+        current_word: Value,
         byte_offset: Value,
         store_active: Value,
     ) -> Value:
@@ -379,7 +378,7 @@ class Executor(Module):
         mask_shifted = store_mask << shift_amount
         store_payload = (store_value & store_mask) << shift_amount
 
-        word_value = dcache._payload[word_index].bitcast(Bits(32))
+        word_value = current_word
         new_word = (word_value & ~mask_shifted) | store_payload
         return store_active.select(new_word, Bits(32)(0))
 

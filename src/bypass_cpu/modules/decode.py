@@ -56,9 +56,8 @@ class Decoder(Module):
             on_branch[0] = Bits(1)(1)
 
         with Condition(~on_branch[0]):
-            exec_call = executor.async_called(inst=inst, pc_value=pc_value)
-
-        exec_call.bind.set_fifo_depth(inst=2)
+            exec_call = executor.async_called(instr=inst, pc_value=pc_value)
+            exec_call.bind.set_fifo_depth(instr=2)
 
 
 def _sign_extend_bits(value: Value, width: int, target: int = 32) -> Value:

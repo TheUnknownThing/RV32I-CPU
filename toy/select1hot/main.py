@@ -58,15 +58,15 @@ class Decoder(Module):
             inst.op_select,
         )
 
-        exec_call = executor.async_called(inst=inst, pc_value=pc_value)
-        exec_call.bind.set_fifo_depth(inst=2)
+        exec_call = executor.async_called(instr=inst, pc_value=pc_value)
+        exec_call.bind.set_fifo_depth(instr=2)
 
 
 class Executor(Module):
     """Single-cycle execute stage with a select1hot ALU."""
 
     def __init__(self):
-        super().__init__(ports={"inst": Port(decoded_instr), "pc_value": Port(Bits(32))})
+        super().__init__(ports={"instr": Port(decoded_instr), "pc_value": Port(Bits(32))})
         self.name = "Executor"
 
     @module.combinational
@@ -76,7 +76,7 @@ class Executor(Module):
         reg_avail: Array,
         wb: Module,
     ):
-        inst = self.inst.peek()
+        inst = self.instr.peek()
         pc_value = self.pc_value.peek()
 
         with Condition(inst.is_ebreak):

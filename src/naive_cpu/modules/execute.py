@@ -6,7 +6,7 @@ class Executor(Module):
     """Single-cycle execute stage with a Select1Hot ALU."""
 
     def __init__(self):
-        super().__init__(ports={"inst": Port(decoded_instr), "pc_value": Port(Bits(32))})
+        super().__init__(ports={"instr": Port(decoded_instr), "pc_value": Port(Bits(32))})
         self.name = "Executor"
 
     @module.combinational
@@ -23,7 +23,7 @@ class Executor(Module):
         on_hazard: Array,
         pc_reg: Array,
     ):
-        inst = self.inst.peek()
+        inst = self.instr.peek()
         pc_value = self.pc_value.peek()
 
         with Condition(inst.is_ebreak):
@@ -65,12 +65,12 @@ class Executor(Module):
             word_addr_width,
             width_flags,
         )
+        current_word = dcache.dout[0].bitcast(Bits(32))
         new_word = self._prepare_store_word(
             inst,
             store_value,
             width_flags,
-            dcache,
-            word_index,
+            current_word,
             byte_offset,
         )
 
@@ -241,8 +241,7 @@ class Executor(Module):
         inst: Value,
         store_value: Value,
         width_flags: tuple[Value, Value, Value],
-        dcache: Module,
-        word_index: Value,
+        current_word: Value,
         byte_offset: Value,
     ) -> Value:
         width_byte, width_half, _ = width_flags
@@ -253,7 +252,7 @@ class Executor(Module):
         mask_shifted = store_mask << shift_amount
         store_payload = (store_value & store_mask) << shift_amount
 
-        word_value = dcache._payload[word_index].bitcast(Bits(32))
+        word_value = current_word
         new_word = (word_value & ~mask_shifted) | store_payload
         return inst.is_store.select(new_word, Bits(32)(0))
 

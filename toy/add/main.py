@@ -59,8 +59,8 @@ class Decoder(Module):
         inst = decode_instruction(raw_inst)
         log("toy-decode | decoded inst: rd=x{:02}, rs1=x{:02}, rs2=x{:02}, is_addi={}", inst.rd, inst.rs1, inst.rs2, inst.is_addi)
 
-        exec_call = executor.async_called(inst=inst, pc_value=pc_value)
-        exec_call.bind.set_fifo_depth(inst=2)
+        exec_call = executor.async_called(instr=inst, pc_value=pc_value)
+        exec_call.bind.set_fifo_depth(instr=2)
 
         # no return, because no wire to expose
 
@@ -68,7 +68,7 @@ class Executor(Module):
     """Single-cycle execution stage with a single adder."""
 
     def __init__(self):
-        super().__init__(ports={"inst": Port(decoded_instr), "pc_value": Port(Bits(32))})
+        super().__init__(ports={"instr": Port(decoded_instr), "pc_value": Port(Bits(32))})
         self.name = "Executor"
 
     @module.combinational
@@ -78,7 +78,7 @@ class Executor(Module):
         reg_avail: Array,
         wb: Module
     ):
-        inst = self.inst.peek()
+        inst = self.instr.peek()
         pc_value = self.pc_value.peek()
         is_ebreak = inst.is_ebreak
         
