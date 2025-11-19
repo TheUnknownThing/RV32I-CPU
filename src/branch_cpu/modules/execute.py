@@ -212,7 +212,7 @@ class Executor(Module):
             target_pc=control_target,
             counter=next_counter,
         )
-        need_btb_write = control_op & ((~branch_meta.btb_hit) | mispredict)
+        need_btb_write = control_op & (~branch_meta.btb_hit)
         with Condition(need_btb_write):
             btb_write_enable[0] = Bits(1)(1)
             btb_write_index[0] = btb_write_index_bits
