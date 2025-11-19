@@ -112,13 +112,9 @@ def build_cpu(
 
         icache = SRAM(width=32, depth=depth, init_file=str(program_image))
         icache.name = "bypass_memory_icache"
-
-        we = Bits(1)(0)
-        re = Bits(1)(1)
-
         icache.build(
-            we=we,
-            re=re,
+            we=Bits(1)(0),
+            re=Bits(1)(1),
             addr=pc_addr,
             wdata=Bits(32)(0),
         )
@@ -137,7 +133,7 @@ def build_cpu(
             on_branch=on_branch,
             on_hazard=on_hazard,
         )
-        correct_pc = executor.build(
+        executor.build(
             reg_file=reg_file,
             reg_avail=reg_avail,
             memory=memory,
