@@ -29,7 +29,7 @@ class Fetcher(Module):
         program_words: int,
         branch_mispredict: Array,
         correct_pc: Array,
-        btb: Module,
+        btb: Array,
         btb_write_enable: Array,
         btb_write_index: Array,
         btb_write_data: Array,
@@ -47,18 +47,8 @@ class Fetcher(Module):
 
         fetch_index_bits = btb_index_bits(pc_value)
         fetch_index = fetch_index_bits.bitcast(Int(BTB_INDEX_BITS))
-        write_index_bits = btb_write_index[0]
-        write_index = write_index_bits.bitcast(Int(BTB_INDEX_BITS))
         btb_we = btb_write_enable[0]
-        btb_addr = btb_we.select(write_index, fetch_index)
-        btb.build(
-            we=btb_we,
-            re=~btb_we,
-            addr=btb_addr,
-            wdata=btb_write_data[0],
-        )
-
-        entry_bits = btb.dout[0].bitcast(Bits(BTB_ENTRY_BITS))
+        entry_bits = btb[fetch_index].bitcast(Bits(BTB_ENTRY_BITS))
         valid, tag, target_pc, counter = unpack_btb_entry(entry_bits)
         pc_tag = btb_tag_bits(pc_value)
         btb_hit = valid & (tag == pc_tag)
@@ -110,6 +100,9 @@ class Fetcher(Module):
             branch_mispredict[0] = Bits(1)(0)
 
         with Condition(btb_we):
+            write_index_bits = btb_write_index[0]
+            write_index = write_index_bits.bitcast(Int(BTB_INDEX_BITS))
+            btb[write_index] = btb_write_data[0]
             btb_write_enable[0] = Bits(1)(0)
 
         return pc_reg, pc_addr

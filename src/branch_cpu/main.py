@@ -103,7 +103,7 @@ def build_cpu(
         btb_write_index = RegArray(Bits(BTB_INDEX_BITS), 1, initializer=[0])
         btb_write_data = RegArray(Bits(BTB_ENTRY_BITS), 1, initializer=[0])
 
-        btb = SRAM(width=BTB_ENTRY_BITS, depth=1 << BTB_INDEX_BITS, init_file=None)
+        btb = RegArray(Bits(BTB_ENTRY_BITS), 1 << BTB_INDEX_BITS, initializer=[0] * (1 << BTB_INDEX_BITS))
         btb.name = "branch_btb"
         spec_tag = RegArray(Bits(SPEC_TAG_BITS), 1, initializer=[0])
 
