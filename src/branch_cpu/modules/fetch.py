@@ -47,11 +47,13 @@ class Fetcher(Module):
 
         fetch_index_bits = btb_index_bits(pc_value)
         fetch_index = fetch_index_bits.bitcast(Int(BTB_INDEX_BITS))
+        
         btb_we = btb_write_enable[0]
         entry_bits = btb[fetch_index].bitcast(Bits(BTB_ENTRY_BITS))
         valid, tag, target_pc, counter = unpack_btb_entry(entry_bits)
         pc_tag = btb_tag_bits(pc_value)
         btb_hit = valid & (tag == pc_tag)
+        
         counter_msb = counter[BTB_COUNTER_BITS - 1 : BTB_COUNTER_BITS - 1]
         predict_taken = btb_hit & counter_msb
 
@@ -62,8 +64,7 @@ class Fetcher(Module):
         has_remaining = rel_pc_int < program_bytes
 
         mispredict_active = branch_mispredict[0]
-        stall_for_btb = btb_we
-        hold_or_pred = stall_for_btb.select(pc_value, predicted_pc)
+        hold_or_pred = btb_we.select(pc_value, predicted_pc)
         bounded_pc = has_remaining.select(hold_or_pred, pc_value)
         next_pc = mispredict_active.select(correct_pc[0], bounded_pc)
         pc_reg[0] = next_pc
@@ -75,7 +76,7 @@ class Fetcher(Module):
             target_pc=target_pc,
         )
 
-        do_fetch = has_remaining & ~stall_for_btb & ~mispredict_active
+        do_fetch = has_remaining & ~btb_we & ~mispredict_active
 
         with Condition(do_fetch):
             log(
@@ -98,7 +99,6 @@ class Fetcher(Module):
 
         with Condition(mispredict_active):
             branch_mispredict[0] = Bits(1)(0)
-
         with Condition(btb_we):
             write_index_bits = btb_write_index[0]
             write_index = write_index_bits.bitcast(Int(BTB_INDEX_BITS))

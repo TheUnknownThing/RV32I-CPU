@@ -21,7 +21,7 @@ from .modules.decode import Decoder
 from .modules.fetch import Fetcher
 from .modules.execute import Executor
 
-from ..naive_cpu.modules.memory import MemoryAccess
+from ..bypass_cpu.modules.memory import MemoryAccess
 from ..naive_cpu.modules.writeback import WriteBack
 from ..naive_cpu.program import (
     memory_address_width,
@@ -124,6 +124,12 @@ def build_cpu(
         reg_file = RegArray(Bits(32), 32, initializer=[0] * 32)
         reg_avail = RegArray(Bits(1), 32, initializer=[1] * 32)
 
+        exec_bypass_reg = RegArray(Bits(5), 1, initializer=[0])
+        exec_bypass_data = RegArray(Bits(32), 1, initializer=[0])
+
+        mem_bypass_reg = RegArray(Bits(5), 1, initializer=[0])
+        mem_bypass_data = RegArray(Bits(32), 1, initializer=[0])
+
         icache = SRAM(width=32, depth=depth, init_file=str(program_image))
         icache.name = "memory_icache"
         icache.build(
@@ -163,10 +169,16 @@ def build_cpu(
             btb_write_index=btb_write_index,
             btb_write_data=btb_write_data,
             spec_tag=spec_tag,
+            exec_bypass_reg=exec_bypass_reg,
+            exec_bypass_data=exec_bypass_data,
+            mem_bypass_reg=mem_bypass_reg,
+            mem_bypass_data=mem_bypass_data,
         )
         memory.build(
             dout=dcache.dout,
             wb=writeback,
+            mem_bypass_reg=mem_bypass_reg,
+            mem_bypass_data=mem_bypass_data,
         )
         writeback.build(reg_file=reg_file, reg_avail=reg_avail)
 
